@@ -94,6 +94,8 @@ const MIGRATIONS: &[(&str, &str, &str)] = &[
     ("messages", "forwarded", "INTEGER NOT NULL DEFAULT 0"),
     ("messages", "delivered_at", "INTEGER"),
     ("messages", "read_at", "INTEGER"),
+    ("chats", "read_through", "INTEGER"),
+    ("chats", "pending_read", "INTEGER"),
 ];
 const CHAT_JOIN: &str = "FROM chats c
              LEFT JOIN messages m ON m.chat = c.id AND m.rowid = (
@@ -300,9 +302,90 @@ impl Archive {
     }
 
     pub fn mark_read(&self, id: &str) -> Result<()> {
-        self.connection
-            .execute("UPDATE chats SET unread = 0 WHERE id = ?1", params![id])?;
+        self.connection.execute(
+            "UPDATE chats SET unread = 0,
+             read_through = MAX(COALESCE(read_through, 0), last_activity) WHERE id = ?1",
+            params![id],
+        )?;
         Ok(())
+    }
+
+    /// A read on another device covers messages up to its position, not newer
+    /// arrivals. Keep the position across restarts and history replays.
+    pub fn mark_read_through(&self, id: &str, timestamp: i64) -> Result<()> {
+        self.connection.execute(
+            "UPDATE chats SET read_through = MAX(COALESCE(read_through, 0), ?2),
+             unread = MIN(unread, (SELECT COUNT(*) FROM messages
+                 WHERE chat = ?1 AND from_me = 0
+                 AND timestamp > MAX(COALESCE(read_through, 0), ?2))) WHERE id = ?1",
+            params![id, timestamp],
+        )?;
+        Ok(())
+    }
+
+    /// A message id disambiguates rapid messages with the same second-level
+    /// timestamp. A receipt for the first must leave the later messages unread.
+    pub fn mark_read_to(&self, chat: &str, message: &str) -> Result<()> {
+        self.connection.execute(
+            "UPDATE chats SET
+             read_through = MAX(COALESCE(read_through, 0),
+                 (SELECT timestamp FROM messages WHERE chat = ?1 AND id = ?2)),
+             unread = MIN(unread, (SELECT COUNT(*) FROM messages m
+                 JOIN messages boundary ON boundary.chat = m.chat AND boundary.id = ?2
+                 WHERE m.chat = ?1 AND m.from_me = 0
+                 AND (m.timestamp > boundary.timestamp
+                      OR (m.timestamp = boundary.timestamp AND m.rowid > boundary.rowid))))
+             WHERE id = ?1 AND EXISTS(SELECT 1 FROM messages WHERE chat = ?1 AND id = ?2)",
+            params![chat, message],
+        )?;
+        Ok(())
+    }
+
+    pub fn read_through(&self, id: &str) -> Result<Option<i64>> {
+        self.connection
+            .query_row(
+                "SELECT read_through FROM chats WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(Option::flatten)
+    }
+
+    pub fn queue_read_sync(&self, id: &str) -> Result<()> {
+        self.connection.execute(
+            "UPDATE chats SET pending_read = read_through WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    pub fn pending_reads(&self) -> Result<Vec<(String, i64)>> {
+        self.connection
+            .prepare("SELECT id, pending_read FROM chats WHERE pending_read IS NOT NULL")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect()
+    }
+
+    pub fn finish_read_sync(&self, id: &str, through: i64) -> Result<()> {
+        self.connection.execute(
+            "UPDATE chats SET pending_read = NULL WHERE id = ?1 AND pending_read <= ?2",
+            params![id, through],
+        )?;
+        Ok(())
+    }
+
+    /// Limit a phone snapshot to messages after any more recent read here.
+    pub fn history_unread(&self, id: &str, unread: u32) -> Result<u32> {
+        let Some(through) = self.read_through(id)? else {
+            return Ok(unread);
+        };
+        let remaining: u32 = self.connection.query_row(
+            "SELECT COUNT(*) FROM messages WHERE chat = ?1 AND from_me = 0 AND timestamp > ?2",
+            params![id, through],
+            |row| row.get(0),
+        )?;
+        Ok(unread.min(remaining))
     }
 
     pub fn set_unread(&self, id: &str, unread: u32) -> Result<()> {
@@ -341,6 +424,7 @@ impl Archive {
     pub fn unread_incoming(&self, chat: &str, limit: u32) -> Result<Vec<(String, String)>> {
         let mut statement = self.connection.prepare(
             "SELECT id, sender FROM messages WHERE chat = ?1 AND from_me = 0
+             AND timestamp >= COALESCE((SELECT read_through FROM chats WHERE id = ?1), -1)
              ORDER BY timestamp DESC, rowid DESC LIMIT ?2",
         )?;
         let rows = statement.query_map(params![chat, i64::from(limit)], |row| {
@@ -1432,6 +1516,46 @@ mod tests {
         assert_eq!(ids, vec!["m2", "m1"]);
         archive.mark_read(chat).expect("read");
         assert_eq!(archive.chat(chat).expect("chat").expect("exists").unread, 0);
+    }
+
+    #[test]
+    fn read_positions_and_pending_sync_survive_reopening_the_archive() {
+        let dir = std::env::temp_dir().join(format!("fastsapp-read-test-{}", std::process::id()));
+        let path = dir.join("archive.db");
+        let _ = std::fs::remove_dir_all(&dir);
+        let chat = "1@s.whatsapp.net";
+        {
+            let archive = Archive::open(&path).unwrap();
+            archive.ensure_chat(chat, "A").unwrap();
+            archive
+                .insert_message(&message(chat, "a", 100, false), None)
+                .unwrap();
+            archive.bump_unread(chat).unwrap();
+            archive.mark_read(chat).unwrap();
+            archive.queue_read_sync(chat).unwrap();
+        }
+        {
+            let archive = Archive::open(&path).unwrap();
+            assert_eq!(archive.read_through(chat).unwrap(), Some(100));
+            assert_eq!(archive.pending_reads().unwrap(), vec![(chat.into(), 100)]);
+            archive
+                .insert_message(&message(chat, "b", 200, false), None)
+                .unwrap();
+            archive.bump_unread(chat).unwrap();
+            archive.mark_read(chat).unwrap();
+            archive.queue_read_sync(chat).unwrap();
+            archive.finish_read_sync(chat, 100).unwrap();
+            assert_eq!(
+                archive.pending_reads().unwrap(),
+                vec![(chat.into(), 200)],
+                "an old completion must not lose the next read"
+            );
+            archive.finish_read_sync(chat, 200).unwrap();
+            assert!(archive.pending_reads().unwrap().is_empty());
+            archive.clear().unwrap();
+            assert!(archive.read_through(chat).unwrap().is_none());
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

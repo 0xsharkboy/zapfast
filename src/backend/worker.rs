@@ -55,6 +55,41 @@ const THUMBNAIL_SIDE: u32 = 96;
 /// Sticker download batch size for the picker.
 const STICKER_FETCH_LIMIT: usize = 40;
 
+fn account_allows_receipts(
+    settings: &whatsapp_rust::wacore::iq::privacy::PrivacySettingsResponse,
+) -> bool {
+    use whatsapp_rust::wacore::iq::privacy::{PrivacyCategory, PrivacyValue};
+    matches!(
+        settings.get_value(&PrivacyCategory::ReadReceipts),
+        Some(PrivacyValue::All)
+    )
+}
+
+/// The library's persisted privacy value is refreshed during connection setup,
+/// which can finish after messages arrive and does not track later phone edits.
+/// Check the account before disclosing a read/play; an unavailable setting is
+/// not permission to send a receipt. Chat-state sync does not use this gate.
+async fn receipts_allowed(
+    client: &Client,
+    jid: &Jid,
+    commands: &mpsc::UnboundedSender<Command>,
+) -> bool {
+    if jid.is_group() {
+        return true;
+    }
+    match client.fetch_privacy_settings().await {
+        Ok(settings) => {
+            let allowed = account_allows_receipts(&settings);
+            let _ = commands.send(Command::ReceiptsPrivacy { disabled: !allowed });
+            allowed
+        }
+        Err(error) => {
+            log::debug!("receipt withheld: account privacy unavailable: {error}");
+            false
+        }
+    }
+}
+
 /// Downloadable recent sticker from the phone.
 struct PhoneSticker(wa::StickerMetadata);
 
@@ -162,6 +197,7 @@ pub async fn run(
         pending_avatars: HashMap::new(),
         sticker_fetches: HashSet::new(),
         sticker_downloads: HashSet::new(),
+        read_syncs: HashMap::new(),
     };
     worker.load_state();
     worker.backfill();
@@ -193,6 +229,7 @@ pub async fn run(
                 worker.expire_older_requests();
                 worker.retry_avatars();
                 worker.pump_group_info();
+                worker.pump_read_sync();
             }
         }
     }
@@ -200,6 +237,8 @@ pub async fn run(
 }
 
 struct Worker {
+    /// None while in flight, otherwise the next retry time.
+    read_syncs: HashMap<ChatId, Option<Instant>>,
     dirs: AppDirs,
     events: std::sync::mpsc::Sender<Event>,
     commands: mpsc::UnboundedSender<Command>,
@@ -254,7 +293,7 @@ struct ParsedHistory {
 struct ParsedChat {
     id: String,
     name: Option<String>,
-    unread: u32,
+    unread: Option<u32>,
     archived: bool,
     pinned: bool,
     muted_until: Option<i64>,
@@ -903,6 +942,7 @@ impl Worker {
                 self.remember_identity(pn, lid, name);
                 self.set_status(LinkStatus::Connected);
                 self.retry_avatars();
+                self.pump_read_sync();
                 if let Some(client) = self.client.clone() {
                     let me = self.me_pn.clone().and_then(|pn| Self::jid_of(&pn));
                     let commands = self.commands.clone();
@@ -913,13 +953,7 @@ impl Worker {
                         // whatsapp-rust also enforces the account privacy setting.
                         match client.fetch_privacy_settings().await {
                             Ok(settings) => {
-                                use whatsapp_rust::wacore::iq::privacy::{
-                                    PrivacyCategory, PrivacyValue,
-                                };
-                                let disabled = matches!(
-                                    settings.get_value(&PrivacyCategory::ReadReceipts),
-                                    Some(PrivacyValue::None)
-                                );
+                                let disabled = !account_allows_receipts(&settings);
                                 let _ = commands.send(Command::ReceiptsPrivacy { disabled });
                             }
                             Err(error) => log::debug!("privacy settings not fetched: {error}"),
@@ -1035,10 +1069,27 @@ impl Worker {
             }
             E::MarkChatAsReadUpdate(update) => {
                 let chat = self.canonical(&update.jid);
+                self.ensure_chat(&chat, None);
                 if update.action.read.unwrap_or(true) {
-                    let _ = self.archive.mark_read(&chat);
+                    let through = update
+                        .action
+                        .message_range
+                        .as_option()
+                        .and_then(|range| range.last_message_timestamp);
+                    if let Some(through) = through {
+                        let _ = self.archive.mark_read_through(&chat, seconds(through));
+                    } else {
+                        let _ = self.archive.mark_read(&chat);
+                    }
                 } else {
-                    let _ = self.archive.set_unread(&chat, 1);
+                    let _ = self.archive.finish_read_sync(&chat, i64::MAX);
+                    let unread = self
+                        .archive
+                        .chat(&chat)
+                        .ok()
+                        .flatten()
+                        .map_or(1, |row| row.unread.max(1));
+                    let _ = self.archive.set_unread(&chat, unread);
                 }
                 self.emit_chat(&chat);
             }
@@ -1116,6 +1167,7 @@ impl Worker {
         self.group_info_tries.clear();
         self.group_info_retry.clear();
         self.presence_subscribed.clear();
+        self.read_syncs.clear();
         self.pending_older.clear();
         self.pending_avatars.clear();
         self.me_pn = None;
@@ -1188,7 +1240,19 @@ impl Worker {
             ReceiptType::Read => Delivery::Read,
             ReceiptType::Played => Delivery::Played,
             ReceiptType::ReadSelf | ReceiptType::PlayedSelf => {
-                let _ = self.archive.mark_read(&chat);
+                // The receipt time is when the phone read, not the position
+                // it read through. A delayed receipt must leave newer messages.
+                for id in &receipt.message_ids {
+                    if self
+                        .archive
+                        .message(&chat, id)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|message| !message.from_me)
+                    {
+                        let _ = self.archive.mark_read_to(&chat, id);
+                    }
+                }
                 self.emit_chat(&chat);
                 return;
             }
@@ -1397,8 +1461,27 @@ impl Worker {
             log::warn!("could not store a message: {error}");
             return;
         }
-        if is_new && !message.from_me {
+        let unread = is_new
+            && !message.from_me
+            && self
+                .archive
+                .read_through(&chat)
+                .ok()
+                .flatten()
+                // A new live message may share the read message's second. Its
+                // distinct id already passed the duplicate check above.
+                .is_none_or(|through| message.timestamp >= through);
+        if unread {
             let _ = self.archive.bump_unread(&chat);
+        } else if message.from_me
+            && matches!(
+                message.status,
+                Delivery::Sent | Delivery::Delivered | Delivery::Read | Delivery::Played
+            )
+        {
+            // A reply sent from the phone/another companion reads the preceding
+            // conversation there. Replayed replies cannot clear newer arrivals.
+            let _ = self.archive.mark_read_to(&chat, &message.id);
         }
         let stored = self
             .archive
@@ -1407,7 +1490,7 @@ impl Worker {
             .flatten()
             .unwrap_or(message);
         // Notify only for live incoming messages, not history replay.
-        let incoming = (is_new && !stored.from_me && !self.syncing).then(|| stored.clone());
+        let incoming = (unread && !self.syncing).then(|| stored.clone());
         self.emit(Event::Messages {
             chat: chat.clone(),
             messages: vec![stored],
@@ -1626,18 +1709,13 @@ impl Worker {
                 };
                 let mut row = Chat::new(id.clone(), name);
                 row.last_activity = chat.last_activity;
-                row.unread = existing
-                    .as_ref()
-                    .map_or(chat.unread, |existing| existing.unread.max(chat.unread));
+                row.unread = existing.as_ref().map_or(0, |existing| existing.unread);
                 row.archived = chat.archived;
                 row.pinned = chat.pinned;
                 row.muted_until = chat.muted_until;
                 if let Err(error) = self.archive.upsert_chat(&row) {
                     log::warn!("could not store chat {id}: {error}");
                     continue;
-                }
-                if row.unread != existing.as_ref().map_or(0, |existing| existing.unread) {
-                    let _ = self.archive.set_unread(&id, row.unread);
                 }
             }
             if ChatKind::from_id(&id) == ChatKind::Group {
@@ -1713,6 +1791,22 @@ impl Worker {
                 let _ = self
                     .archive
                     .set_content(&id, &revoked, &Content::Revoked, false);
+            }
+            if (metadata || existing.is_none())
+                && let Some(snapshot_unread) = chat.unread
+            {
+                if snapshot_unread == 0 {
+                    let _ = self.archive.mark_read_through(&id, chat.last_activity);
+                } else {
+                    let unread = self
+                        .archive
+                        .history_unread(&id, snapshot_unread)
+                        .unwrap_or(0);
+                    let unread = existing
+                        .as_ref()
+                        .map_or(unread, |existing| existing.unread.max(unread));
+                    let _ = self.archive.set_unread(&id, unread);
+                }
             }
             filed.push((id, count, chat.more_on_phone));
         }
@@ -1837,6 +1931,20 @@ impl Worker {
                 });
             }
             Command::MarkRead { chat, receipts } => self.mark_read(chat, receipts),
+            Command::ReadSyncFinished {
+                chat,
+                through,
+                success,
+            } => {
+                if success {
+                    let _ = self.archive.finish_read_sync(&chat, through);
+                    self.read_syncs.remove(&chat);
+                    self.pump_read_sync();
+                } else {
+                    self.read_syncs
+                        .insert(chat, Some(Instant::now() + Duration::from_secs(30)));
+                }
+            }
             Command::LoadChat { chat, before } => self.load_chat(chat, before),
             Command::FetchOlder(chat) => self.fetch_older(chat),
             Command::LoadUntil { chat, id, before } => self.load_until(chat, id, before),
@@ -2056,7 +2164,12 @@ impl Worker {
                 chat,
                 message,
                 sender,
-            } => self.mark_played(chat, message, sender),
+                receipts,
+            } => {
+                if receipts {
+                    self.mark_played(chat, message, sender);
+                }
+            }
             Command::SendGif { chat, gif } => self.send_gif(chat, gif),
             Command::SearchGifs { query, key } => {
                 let commands = self.commands.clone();
@@ -2421,15 +2534,71 @@ impl Worker {
         let Ok(Some(row)) = self.archive.chat(&chat) else {
             return;
         };
+        // Collect before advancing the archive's read position.
+        let ids = if receipts {
+            self.archive
+                .unread_incoming(&chat, row.unread)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let _ = self.archive.mark_read(&chat);
         self.emit_chat(&chat);
-        if row.unread == 0 || !receipts {
+        if row.unread == 0 {
+            return;
+        }
+        let _ = self.archive.queue_read_sync(&chat);
+        self.pump_read_sync();
+        self.send_read_receipts(chat, ids);
+    }
+
+    fn pump_read_sync(&mut self) {
+        if !matches!(self.status, LinkStatus::Connected) {
+            return;
+        }
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        for (chat, through) in self.archive.pending_reads().unwrap_or_default() {
+            if self
+                .read_syncs
+                .get(&chat)
+                .is_some_and(|retry| retry.is_none_or(|retry| retry > Instant::now()))
+            {
+                continue;
+            }
+            let Some(jid) = Self::jid_of(&chat) else {
+                continue;
+            };
+            self.read_syncs.insert(chat.clone(), None);
+            let client = client.clone();
+            let commands = self.commands.clone();
+            tokio::spawn(async move {
+                // This update is private to our devices, even with blue ticks
+                // disabled. Keep the original position when retrying offline
+                // reads, not the latest message received since the local read.
+                let range = whatsapp_rust::message_range(through, None, Vec::new());
+                let result = client
+                    .chat_actions()
+                    .mark_chat_as_read(&jid, true, Some(range))
+                    .await;
+                if let Err(error) = &result {
+                    log::debug!("chat read state not synced: {error}");
+                }
+                let _ = commands.send(Command::ReadSyncFinished {
+                    chat,
+                    through,
+                    success: result.is_ok(),
+                });
+            });
+        }
+    }
+
+    fn send_read_receipts(&self, chat: ChatId, ids: Vec<(String, String)>) {
+        if ids.is_empty() {
             return;
         }
         let (Some(client), Some(jid)) = (self.client.clone(), Self::jid_of(&chat)) else {
-            return;
-        };
-        let Ok(ids) = self.archive.unread_incoming(&chat, row.unread) else {
             return;
         };
         let is_group = jid.is_group();
@@ -2440,7 +2609,11 @@ impl Worker {
                 .or_default()
                 .push(id);
         }
+        let commands = self.commands.clone();
         tokio::spawn(async move {
+            if !receipts_allowed(&client, &jid, &commands).await {
+                return;
+            }
             for (sender, ids) in by_sender {
                 let sender = sender.and_then(|sender| sender.parse::<Jid>().ok());
                 let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
@@ -3313,7 +3486,11 @@ impl Worker {
         } else {
             None
         };
+        let commands = self.commands.clone();
         tokio::spawn(async move {
+            if !receipts_allowed(&client, &jid, &commands).await {
+                return;
+            }
             if let Err(error) = client
                 .mark_as_played(&jid, sender.as_ref(), &[message.as_str()])
                 .await
@@ -4491,7 +4668,7 @@ fn parse_conversation(conversation: wa::Conversation) -> ParsedChat {
     ParsedChat {
         id: conversation.id.clone(),
         name: non_empty(&conversation.display_name).or_else(|| non_empty(&conversation.name)),
-        unread: conversation.unread_count.unwrap_or(0),
+        unread: conversation.unread_count,
         archived: conversation.archived.unwrap_or(false),
         pinned: conversation.pinned.unwrap_or(0) > 0,
         muted_until: conversation
@@ -4784,6 +4961,7 @@ mod receipt_tests {
             pending_avatars: HashMap::new(),
             sticker_fetches: HashSet::new(),
             sticker_downloads: HashSet::new(),
+            read_syncs: HashMap::new(),
         };
         (worker, events_rx, inbox, wa_events)
     }
@@ -4822,6 +5000,226 @@ mod receipt_tests {
             .r#type(kind)
             .offline(false)
             .build()
+    }
+
+    fn incoming(id: &str, timestamp: i64) -> Message {
+        Message {
+            from_me: false,
+            sender: PEER.into(),
+            status: Delivery::None,
+            ..own_message(id, timestamp)
+        }
+    }
+
+    #[test]
+    fn unknown_or_disabled_account_privacy_never_permits_receipts() {
+        use whatsapp_rust::wacore::iq::privacy::{
+            PrivacyCategory, PrivacySetting, PrivacySettingsResponse, PrivacyValue,
+        };
+        let mut settings = PrivacySettingsResponse {
+            settings: Vec::new(),
+        };
+        assert!(!account_allows_receipts(&settings));
+        settings.settings.push(PrivacySetting {
+            category: PrivacyCategory::ReadReceipts,
+            value: PrivacyValue::None,
+        });
+        assert!(!account_allows_receipts(&settings));
+        settings.settings[0].value = PrivacyValue::All;
+        assert!(account_allows_receipts(&settings));
+        settings.settings[0].value = PrivacyValue::None;
+        assert!(
+            !account_allows_receipts(&settings),
+            "a phone privacy change takes effect without reconnecting"
+        );
+    }
+
+    fn unread(worker: &Worker) -> u32 {
+        worker.archive.chat(PEER).unwrap().unwrap().unread
+    }
+
+    fn history(unread: u32) -> ParsedHistory {
+        ParsedHistory {
+            chats: vec![parse_conversation(wa::Conversation {
+                id: PEER.into(),
+                unread_count: Some(unread),
+                conversation_timestamp: Some(200),
+                ..Default::default()
+            })],
+            push_names: Vec::new(),
+            lids: Vec::new(),
+            stickers: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn reading_without_blue_ticks_still_queues_private_sync_and_survives_history() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        worker.store_message(incoming("a", 100), None, None);
+        worker.store_message(incoming("b", 200), None, None);
+        assert_eq!(unread(&worker), 2);
+        worker.mark_read(PEER.into(), false);
+        assert_eq!(unread(&worker), 0);
+        assert_eq!(
+            worker.archive.pending_reads().unwrap(),
+            vec![(PEER.into(), 200)]
+        );
+        worker.apply_history(history(2), true);
+        assert_eq!(
+            unread(&worker),
+            0,
+            "stale history must not resurrect badges"
+        );
+        worker.store_message(incoming("late", 150), None, None);
+        assert_eq!(unread(&worker), 0, "a delayed read message stays read");
+        worker.store_message(incoming("new", 300), None, None);
+        worker.apply_history(history(2), false);
+        assert_eq!(
+            unread(&worker),
+            1,
+            "paging old history preserves a new unread message"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_read_sync_stays_queued_until_it_succeeds() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        worker.store_message(incoming("a", 100), None, None);
+        worker.mark_read(PEER.into(), false);
+        worker
+            .handle_command(Command::ReadSyncFinished {
+                chat: PEER.into(),
+                through: 100,
+                success: false,
+            })
+            .await;
+        assert_eq!(
+            worker.archive.pending_reads().unwrap(),
+            vec![(PEER.into(), 100)]
+        );
+        assert!(worker.read_syncs[PEER].is_some_and(|retry| retry > Instant::now()));
+        worker
+            .handle_command(Command::ReadSyncFinished {
+                chat: PEER.into(),
+                through: 100,
+                success: true,
+            })
+            .await;
+        assert!(worker.archive.pending_reads().unwrap().is_empty());
+        assert!(!worker.read_syncs.contains_key(PEER));
+    }
+
+    #[test]
+    fn replying_on_the_phone_reads_only_preceding_messages() {
+        let (mut worker, events, _inbox, _wa) = worker();
+        worker.store_message(incoming("old", 100), None, None);
+        worker.store_message(incoming("new", 300), None, None);
+        worker.store_message(
+            Message {
+                status: Delivery::Failed,
+                ..own_message("failed", 400)
+            },
+            None,
+            None,
+        );
+        assert_eq!(unread(&worker), 2, "a failed send does not read the chat");
+        worker.store_message(own_message("reply", 200), None, None);
+        assert_eq!(unread(&worker), 1);
+        worker.store_message(own_message("reply2", 400), None, None);
+        assert_eq!(unread(&worker), 0);
+        worker.store_message(own_message("reply", 200), None, None);
+        assert_eq!(worker.archive.read_through(PEER).unwrap(), Some(400));
+        while events.try_recv().is_ok() {}
+        worker.store_message(incoming("late", 150), None, None);
+        assert_eq!(unread(&worker), 0);
+        assert!(
+            !events
+                .try_iter()
+                .any(|event| matches!(event, Event::Incoming { .. }))
+        );
+    }
+
+    #[test]
+    fn delayed_phone_receipts_preserve_newer_unread_messages() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        worker.learn_lid("167650256810092", "4917663430455");
+        worker.store_message(incoming("old", 100), None, None);
+        worker.store_message(incoming("new", 300), None, None);
+        worker.on_receipt(&receipt(PEER_LID, &["old"], ReceiptType::ReadSelf));
+        assert_eq!(unread(&worker), 1);
+        worker.on_receipt(&receipt(PEER_LID, &["unknown"], ReceiptType::ReadSelf));
+        assert_eq!(
+            unread(&worker),
+            1,
+            "an unknown receipt has no known read position"
+        );
+        worker.on_receipt(&receipt(PEER_LID, &["new"], ReceiptType::ReadSelf));
+        assert_eq!(unread(&worker), 0);
+    }
+
+    #[test]
+    fn rapid_messages_keep_distinct_read_positions_within_the_same_second() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        worker.store_message(incoming("first", 100), None, None);
+        worker.mark_read(PEER.into(), false);
+        worker.store_message(incoming("second", 100), None, None);
+        worker.store_message(incoming("third", 100), None, None);
+        assert_eq!(unread(&worker), 2);
+        worker.on_receipt(&receipt(PEER, &["first"], ReceiptType::ReadSelf));
+        assert_eq!(unread(&worker), 2);
+        worker.on_receipt(&receipt(PEER, &["second"], ReceiptType::ReadSelf));
+        assert_eq!(unread(&worker), 1);
+        assert_eq!(
+            worker.archive.unread_incoming(PEER, 1).unwrap(),
+            vec![("third".into(), PEER.into())]
+        );
+        worker.on_receipt(&receipt(PEER, &["third"], ReceiptType::ReadSelf));
+        assert_eq!(unread(&worker), 0);
+    }
+
+    #[test]
+    fn a_phone_history_snapshot_can_clear_stale_unread_counts() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        worker.store_message(incoming("a", 100), None, None);
+        worker.store_message(incoming("b", 200), None, None);
+        worker.store_message(incoming("new", 300), None, None);
+        worker.apply_history(history(0), true);
+        assert_eq!(
+            unread(&worker),
+            1,
+            "a read snapshot preserves later arrivals"
+        );
+        worker.apply_history(history(2), true);
+        assert_eq!(
+            unread(&worker),
+            1,
+            "older unread history cannot undo a read snapshot"
+        );
+    }
+
+    #[tokio::test]
+    async fn phone_read_updates_cover_their_range_even_before_history_arrives() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        let event = wa_events::MarkChatAsReadUpdate::builder()
+            .jid(PEER.parse().unwrap())
+            .timestamp(whatsapp_rust::wacore::time::now_utc())
+            .from_full_sync(false)
+            .action(Box::new(wa::sync_action_value::MarkChatAsReadAction {
+                read: Some(true),
+                message_range: MessageField::some(whatsapp_rust::message_range(
+                    200,
+                    None,
+                    Vec::new(),
+                )),
+            }))
+            .build();
+        worker
+            .handle_wa_event(Arc::new(wa_events::Event::MarkChatAsReadUpdate(event)))
+            .await;
+        worker.apply_history(history(2), true);
+        worker.store_message(incoming("late", 100), None, None);
+        worker.store_message(incoming("new", 300), None, None);
+        assert_eq!(unread(&worker), 1);
     }
 
     #[test]

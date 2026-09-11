@@ -23,6 +23,11 @@ See **[fastsapp.rocks](https://fastsapp.rocks)** for downloads and guides.
   Recent history is copied to this computer after linking and stored here.
 - **Chats.** See pinned, unread, muted, and archived chats, typing indicators,
   and message status. Search chats, saved messages, and contacts.
+- **Read state across devices.** Reading a chat syncs its unread badge with
+  your phone and other linked devices, including when read receipts are off.
+  Replies from another device clear preceding unread messages. The read-receipt
+  toggle also controls voice-message played receipts; account privacy is checked
+  before sending receipts in direct chats. A hidden window does not read messages.
 - **Conversations.** See replies, reactions, edits, deleted messages, read
   receipts, sender names, and group pictures. Older messages load as you
   scroll up, first from the local archive and then from your phone.
@@ -68,7 +73,8 @@ See **[fastsapp.rocks](https://fastsapp.rocks)** for downloads and guides.
   tray or with `Ctrl+Q`, or disable this behavior in Settings.
 - **Desktop notifications.** Get notifications with the chat picture when you
   are away from the open chat. Muted chats do not notify you. On Linux,
-  clicking a notification opens the chat.
+  clicking a notification opens the chat, and reading the chat here or on another
+  device dismisses its outstanding notifications.
 - **Update notices.** FastsApp checks GitHub once a day and shows a download
   link when a newer release is available. You can turn this off in Settings.
 - **Light and dark**, or follow the system. Zoom with Ctrl+plus and

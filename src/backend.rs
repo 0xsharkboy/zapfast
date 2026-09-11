@@ -70,6 +70,12 @@ pub enum Command {
         chat: ChatId,
         receipts: bool,
     },
+    /// Result of a private read-state update to the other linked devices.
+    ReadSyncFinished {
+        chat: ChatId,
+        through: i64,
+        success: bool,
+    },
     /// Loads archived chat messages before an optional boundary.
     LoadChat {
         chat: ChatId,
@@ -157,6 +163,7 @@ pub enum Command {
         chat: ChatId,
         message: String,
         sender: String,
+        receipts: bool,
     },
     /// Sends a WebP sticker.
     SendSticker {
@@ -482,6 +489,16 @@ impl Backend {
             },
             event_tx,
         )
+    }
+
+    /// Records commands without a runtime or network connection.
+    #[cfg(test)]
+    pub(crate) fn recording() -> (Self, mpsc::UnboundedReceiver<Command>) {
+        let (mut backend, _) = Self::detached();
+        let (commands, inbox) = mpsc::unbounded_channel();
+        backend.commands = commands;
+        backend.offline = false;
+        (backend, inbox)
     }
 
     /// Disables commands except shutdown.

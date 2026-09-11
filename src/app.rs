@@ -249,6 +249,7 @@ pub struct App {
     control_commands: Option<std::sync::Arc<std::sync::Mutex<Vec<ControlCommand>>>>,
     /// Chat ids from clicked notifications.
     notification_opens: std::sync::Arc<std::sync::Mutex<Vec<ChatId>>>,
+    notifications: crate::notify::Notifications,
 }
 
 /// Attachment pending in the composer.
@@ -411,7 +412,7 @@ impl App {
             focus_composer: false,
             focus_search: false,
             quit_requested: false,
-            window_focused: true,
+            window_focused: false,
             waker,
             tray: None,
             window_hidden: false,
@@ -419,12 +420,14 @@ impl App {
             wants_show: false,
             control_commands: None,
             notification_opens: Default::default(),
+            notifications: Default::default(),
         }
     }
 
     /// Updates the linked app while no window exists.
     pub fn window_gone(&mut self) {
         self.window_hidden = true;
+        self.window_focused = false;
         self.hide_intent = false;
         self.wants_show = false;
         if let Some(tray) = &mut self.tray {
@@ -491,7 +494,7 @@ impl App {
         };
         let now = crate::util::now();
         // Skip muted chats and delayed reconnect backlogs.
-        if chat.muted(now) || now - message.timestamp > 60 {
+        if chat.unread == 0 || chat.muted(now) || now - message.timestamp > 60 {
             return;
         }
         let reading = !self.window_hidden
@@ -514,7 +517,7 @@ impl App {
             .or_else(|| self.avatar(&sender))
             .or_else(|| self.cached_avatar(&sender));
         let waker = self.waker.clone();
-        crate::notify::show(
+        self.notifications.show(
             title,
             body,
             picture,
@@ -928,6 +931,11 @@ impl App {
                     self.me_about = about;
                 }
                 Event::Chats(chats) => {
+                    for chat in &chats {
+                        if chat.unread == 0 {
+                            self.notifications.clear(&chat.id);
+                        }
+                    }
                     self.chats = chats;
                     if let Some(open) = self.open_chat.clone() {
                         if self.chat(&open).is_none() {
@@ -1145,6 +1153,7 @@ impl App {
                 }
             }
             LinkStatus::LoggedOut => {
+                self.notifications.clear_all();
                 self.chats.clear();
                 self.conversations.clear();
                 self.contacts.clear();
@@ -1162,7 +1171,10 @@ impl App {
         let is_open =
             self.open_chat.as_deref() == Some(chat.id.as_str()) && self.page == Page::Chats;
         let mut chat = chat;
-        if is_open && chat.unread > 0 && self.window_focused {
+        if chat.unread == 0 {
+            self.notifications.clear(&chat.id);
+        }
+        if is_open && chat.unread > 0 && self.window_focused && !self.window_hidden {
             chat.unread = 0;
             self.mark_read(&chat.id);
         }
@@ -1266,6 +1278,7 @@ impl App {
     }
 
     fn mark_read(&mut self, chat: &str) {
+        self.notifications.clear(chat);
         if let Some(known) = self.chat_mut(chat) {
             known.unread = 0;
         }
@@ -2134,6 +2147,11 @@ impl App {
 
     /// Processes app state shared by windowed and headless modes.
     pub fn background_frame(&mut self, ctx: &egui::Context) {
+        // Events are drained before frame_ui observes focus. Losing focus in
+        // this frame must take effect before an incoming chat update can read it.
+        if self.window_hidden || ctx.input(|input| input.viewport().focused) == Some(false) {
+            self.window_focused = false;
+        }
         self.handle_tray();
         self.handle_control_commands();
         self.handle_notification_opens();
@@ -2163,6 +2181,10 @@ impl App {
             self.toast_error(error);
             return;
         }
+        self.tell_played(message);
+    }
+
+    fn tell_played(&mut self, message: String) {
         let Some(chat) = self.open_chat.clone() else {
             return;
         };
@@ -2185,6 +2207,7 @@ impl App {
             chat,
             message,
             sender,
+            receipts: self.settings.send_read_receipts,
         });
     }
 
@@ -2522,6 +2545,86 @@ mod tests {
     fn app() -> App {
         let root = std::env::temp_dir().join(format!("fastsapp-app-{}", std::process::id()));
         App::headless(AppDirs::under(&root), Settings::default()).0
+    }
+
+    #[test]
+    fn a_closed_window_does_not_read_new_messages_in_the_last_chat() {
+        let mut app = app();
+        let mut chat = Chat::new("peer@s.whatsapp.net".into(), "Peer".into());
+        app.open_chat = Some(chat.id.clone());
+        app.window_focused = true;
+        app.window_gone();
+        assert!(!app.window_focused);
+        chat.unread = 2;
+        app.handle_chat_updated(chat.clone());
+        assert_eq!(app.chat(&chat.id).unwrap().unread, 2);
+        // Focus left over from a window callback is insufficient while hidden.
+        app.window_focused = true;
+        app.handle_chat_updated(chat.clone());
+        assert_eq!(app.chat(&chat.id).unwrap().unread, 2);
+        app.window_hidden = false;
+        app.handle_chat_updated(chat.clone());
+        assert_eq!(app.chat(&chat.id).unwrap().unread, 0);
+    }
+
+    #[test]
+    fn losing_focus_takes_effect_before_processing_an_incoming_chat_update() {
+        let root = std::env::temp_dir().join("fastsapp-focus-test");
+        let (mut app, events) = App::headless(AppDirs::under(&root), Settings::default());
+        let mut chat = Chat::new("peer@s.whatsapp.net".into(), "Peer".into());
+        chat.unread = 1;
+        app.open_chat = Some(chat.id.clone());
+        app.window_focused = true;
+        events
+            .send(Event::ChatUpdated(Box::new(chat.clone())))
+            .unwrap();
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .focused = Some(false);
+        let mut output = ctx.run_ui(input, |ui| app.background_frame(ui.ctx()));
+        output.textures_delta.clear();
+        assert_eq!(app.chat(&chat.id).unwrap().unread, 1);
+    }
+
+    #[test]
+    fn read_receipt_preference_applies_to_both_reading_and_voice_playback() {
+        let mut app = app();
+        let (backend, mut commands) = Backend::recording();
+        app.backend = backend;
+        let chat = "peer@s.whatsapp.net";
+        app.open_chat = Some(chat.into());
+        app.conversations
+            .entry(chat.into())
+            .or_default()
+            .merge(vec![message(chat, "voice", 100)], false);
+        app.settings.send_read_receipts = false;
+        app.mark_read(chat);
+        assert!(matches!(
+            commands.try_recv().unwrap(),
+            Command::MarkRead {
+                receipts: false,
+                ..
+            }
+        ));
+        app.tell_played("voice".into());
+        assert!(matches!(
+            commands.try_recv().unwrap(),
+            Command::MarkPlayed {
+                receipts: false,
+                ..
+            }
+        ));
+        app.settings.send_read_receipts = true;
+        app.played_told.clear();
+        app.tell_played("voice".into());
+        assert!(matches!(
+            commands.try_recv().unwrap(),
+            Command::MarkPlayed { receipts: true, .. }
+        ));
     }
 
     fn message(chat: &str, id: &str, timestamp: i64) -> Message {

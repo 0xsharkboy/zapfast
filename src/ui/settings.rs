@@ -72,9 +72,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     section(ui, app, "Chats");
                     toggle(ui, app, "Enter sends", "When off, Enter adds a line and Ctrl+Enter sends.", |settings| &mut settings.enter_sends);
                     let receipts_note = if app.account_receipts_off {
-                        "Read receipts are disabled for your WhatsApp account. One-to-one chats will not send them. Groups always do."
+                        "Read receipts are disabled for your WhatsApp account. Direct chats will not send them. When this switch is on, groups still do. Read state syncs between your devices either way."
                     } else {
-                        "Let people see when you read their messages. Your WhatsApp privacy setting still applies."
+                        "Let people see when you read messages or play voice messages. Your WhatsApp privacy setting still applies. Read state syncs between your devices either way."
                     };
                     toggle(ui, app, "Send read receipts", receipts_note, |settings| &mut settings.send_read_receipts);
                     toggle(ui, app, "Show when you are typing", "", |settings| &mut settings.send_typing);

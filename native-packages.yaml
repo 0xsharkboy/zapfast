@@ -1,0 +1,136 @@
+# Shared CLI: gem install native-packages --version 0.2.0
+---
+schema: 1
+tool:
+  version: 0.2.0
+  nfpm: 2.47.0
+nfpm:
+  name: fastsapp
+  maintainer: Carmine Paolino <carmine@paolino.me>
+  homepage: https://github.com/crmne/fastsapp
+  description: Fast native WhatsApp client
+  license: MIT
+  contents:
+  - src: "@PAYLOAD@/fastsapp-v@VERSION@-@TARGET@/fastsapp"
+    dst: "/usr/bin/fastsapp"
+    file_info:
+      mode: 493
+  - src: "@PAYLOAD@/fastsapp-v@VERSION@-@TARGET@/LICENSE"
+    dst: "/usr/share/licenses/fastsapp/LICENSE"
+    file_info:
+      mode: 420
+  - src: "@PAYLOAD@/fastsapp-v@VERSION@-@TARGET@/README.md"
+    dst: "/usr/share/doc/fastsapp/README.md"
+    file_info:
+      mode: 420
+  - src: "@PAYLOAD@/fastsapp-v@VERSION@-@TARGET@/packaging/applications/fastsapp.desktop"
+    dst: "/usr/share/applications/fastsapp.desktop"
+    file_info:
+      mode: 420
+  - src: "@PAYLOAD@/fastsapp-v@VERSION@-@TARGET@/packaging/icons/fastsapp.svg"
+    dst: "/usr/share/icons/hicolor/scalable/apps/fastsapp.svg"
+    file_info:
+      mode: 420
+  overrides:
+    deb:
+      depends:
+      - libc6 (>= 2.39)
+      - libgl1
+      - libxkbcommon0
+      - libwayland-client0
+      - libx11-6
+      - libasound2
+      - libgcc-s1
+      - libstdc++6
+    rpm:
+      depends:
+      - glibc >= 2.39
+      - libglvnd-glx
+      - libxkbcommon
+      - wayland-libs
+      - libX11
+      - alsa-lib
+      - libgcc
+      - libstdc++
+  rpm:
+    buildhost: github-actions
+targets:
+  linux-amd64:
+    platform: linux
+    arch: amd64
+    libc: glibc
+    compiler_target: x86_64-unknown-linux-gnu
+    formats:
+    - deb
+    - rpm
+    input:
+      local: dist/fastsapp-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+      release_asset: fastsapp-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+  linux-arm64:
+    platform: linux
+    arch: arm64
+    libc: glibc
+    compiler_target: aarch64-unknown-linux-gnu
+    formats:
+    - deb
+    - rpm
+    input:
+      local: dist/fastsapp-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+      release_asset: fastsapp-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+release:
+  repository: crmne/fastsapp
+  checksums: checksums.txt
+assets:
+  AMD64:
+    file: fastsapp-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+    local: dist/fastsapp-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+  ARM64:
+    file: fastsapp-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+    local: dist/fastsapp-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+  SOURCE:
+    file: fastsapp-@VERSION@.tar.gz
+    url: https://github.com/crmne/fastsapp/archive/refs/tags/v@VERSION@.tar.gz
+    checksummed: false
+    local: dist/fastsapp-@VERSION@.tar.gz
+templates:
+  arch/fastsapp/PKGBUILD: packaging/arch/fastsapp/PKGBUILD.in
+  arch/fastsapp/fastsapp.install: packaging/arch/fastsapp.install
+  arch/fastsapp-bin/PKGBUILD: packaging/arch/fastsapp-bin/PKGBUILD.in
+  arch/fastsapp-bin/fastsapp-bin.install: packaging/arch/fastsapp.install
+  arch/fastsapp-git/PKGBUILD: packaging/arch/fastsapp-git/PKGBUILD.in
+  arch/fastsapp-git/fastsapp-git.install: packaging/arch/fastsapp.install
+repositories:
+  aur-source:
+    group: aur
+    url: https://aur.archlinux.org/fastsapp.git
+    push_url: ssh://aur@aur.archlinux.org/fastsapp.git
+    branch: master
+    package_path: "."
+    files:
+      arch/fastsapp: "."
+    version_file: ".SRCINFO"
+    version_pattern: "^\\s*pkgver = (\\S+)"
+    publish: push
+  aur-bin:
+    group: aur
+    url: https://aur.archlinux.org/fastsapp-bin.git
+    push_url: ssh://aur@aur.archlinux.org/fastsapp-bin.git
+    branch: master
+    package_path: "."
+    files:
+      arch/fastsapp-bin: "."
+    version_file: ".SRCINFO"
+    version_pattern: "^\\s*pkgver = (\\S+)"
+    publish: push
+  aur-git:
+    group: aur
+    url: https://aur.archlinux.org/fastsapp-git.git
+    push_url: ssh://aur@aur.archlinux.org/fastsapp-git.git
+    branch: master
+    package_path: "."
+    files:
+      arch/fastsapp-git: "."
+    version_file: ".SRCINFO"
+    version_pattern: "^\\s*pkgver = (\\S+)"
+    publish: push
+version_file: Cargo.toml

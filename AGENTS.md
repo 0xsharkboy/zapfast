@@ -185,13 +185,13 @@ A release is not finished when the tag is pushed. Do these in order:
    The menu lists only the current version, which points to `/download/`,
    and the Changelog link; do not add older versions to it. Never point the
    download page at files that do not exist yet.
-5. Update the AUR packages in the maintainer's `~/Code/aur/` clones:
-   `fastsapp-bin` gets the new `pkgver`, `pkgrel=1`, and both Linux checksums
-   from `checksums.txt`; `fastsapp` gets the new `pkgver`, `pkgrel=1`, and
-   the source tarball checksum from `makepkg -g`. For each package, run
-   `makepkg --printsrcinfo > .SRCINFO` and `makepkg -f`, then commit and
-   push. Only update `fastsapp-git` when the build recipe or dependencies
-   change.
+5. Update the AUR packages from the templates in `packaging/arch/`. The shared
+   packaging workflow generates versions, hashes and `.SRCINFO` after the
+   release exists, and publishes when `PUBLISH_AUR` and the required secrets
+   are configured. Otherwise use `native-packages` to build, stage,
+   review and publish the generated recipes; see `PACKAGING.md`. Validate
+   native builds with `makepkg -f`. A recipe-only `fastsapp-git` change does
+   not require an application release.
 
 ## Definition of done
 

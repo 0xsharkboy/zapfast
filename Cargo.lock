@@ -6605,6 +6605,7 @@ dependencies = [
  "opus",
  "png 0.18.1",
  "qrcode",
+ "raw-window-handle",
  "resvg",
  "rfd",
  "rodio",

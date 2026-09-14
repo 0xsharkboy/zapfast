@@ -9,6 +9,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::model::{Chat, ChatKind, Contact, Content, Delivery, LastMessage, Message};
 
+mod receipts;
+
 /// Recent phone sticker metadata, last-used time, and optional local file.
 #[derive(Clone, Debug)]
 pub struct PhoneSticker {
@@ -79,6 +81,20 @@ CREATE TABLE IF NOT EXISTS stickers (
     weight REAL NOT NULL DEFAULT 0,
     path TEXT
 );
+CREATE TABLE IF NOT EXISTS group_receipts (
+    chat TEXT NOT NULL,
+    id TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    expected INTEGER NOT NULL DEFAULT 0,
+    status INTEGER NOT NULL DEFAULT 0,
+    delivered_at INTEGER,
+    read_at INTEGER,
+    played_at INTEGER,
+    PRIMARY KEY (chat, id, recipient)
+);
+CREATE TRIGGER IF NOT EXISTS delete_group_receipts AFTER DELETE ON messages BEGIN
+    DELETE FROM group_receipts WHERE chat = OLD.chat AND id = OLD.id;
+END;
 ";
 
 const CHAT_COLUMNS: &str =
@@ -477,6 +493,7 @@ impl Archive {
             "INSERT INTO lids (lid, pn) VALUES (?1, ?2) ON CONFLICT(lid) DO UPDATE SET pn = excluded.pn",
             params![lid, pn],
         )?;
+        self.merge_group_recipient(&format!("{lid}@lid"), &format!("{pn}@s.whatsapp.net"))?;
         Ok(())
     }
 
@@ -1098,7 +1115,7 @@ mod tests {
     use super::*;
     use crate::model::Content;
 
-    fn message(chat: &str, id: &str, timestamp: i64, from_me: bool) -> Message {
+    pub(super) fn message(chat: &str, id: &str, timestamp: i64, from_me: bool) -> Message {
         Message {
             id: id.into(),
             chat: chat.into(),

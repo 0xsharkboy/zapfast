@@ -10,6 +10,10 @@ use crate::theme::{self, Icon};
 use super::widgets;
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
+    super::standalone_header(app, ui);
+    if theme::macos_chrome(ui.ctx()) {
+        super::banner(app, ui);
+    }
     let palette = app.palette;
     egui::ScrollArea::vertical()
         .id_salt("settings")

@@ -1159,6 +1159,45 @@ mod tests {
         }
     }
 
+    #[test]
+    fn macos_headers_fit_when_zoomed_with_and_without_the_sidebar() {
+        for zoom in [0.6, 1.0, 2.0] {
+            for page in [
+                "chat",
+                "nosidebar",
+                "settings",
+                "settings,nosidebar",
+                "empty,nosidebar",
+                "archived",
+                "offline",
+                "login",
+            ] {
+                let mut app = self::app();
+                app.settings.zoom = zoom;
+                apply_flags(&mut app, Some(page));
+                let ctx = egui::Context::default();
+                app.attach(&ctx);
+                crate::theme::preview_macos(&ctx);
+                render(&mut app, &ctx);
+                assert!(
+                    (crate::theme::traffic_light_inset(&ctx) * ctx.zoom_factor() - 84.0).abs()
+                        < 0.01
+                );
+                let mut input = egui::RawInput::default();
+                input
+                    .viewports
+                    .get_mut(&egui::ViewportId::ROOT)
+                    .unwrap()
+                    .fullscreen = Some(true);
+                let mut output = ctx.run_ui(input, |ui| {
+                    assert_eq!(crate::theme::traffic_light_inset(ui.ctx()), 0.0);
+                    app.frame_ui(ui);
+                });
+                output.textures_delta.clear();
+            }
+        }
+    }
+
     /// Runs one frame with input events.
     fn frame_with(app: &mut App, ctx: &egui::Context, events: Vec<egui::Event>) {
         let mut output = ctx.run_ui(

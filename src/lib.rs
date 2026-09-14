@@ -8,6 +8,8 @@ pub mod backend;
 #[cfg(any(test, feature = "demo"))]
 pub mod demo;
 pub mod emoji;
+#[cfg(target_os = "macos")]
+pub mod macos;
 pub mod markup;
 pub mod model;
 pub mod notify;

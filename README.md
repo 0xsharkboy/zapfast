@@ -31,6 +31,11 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
 - **Conversations.** See replies, reactions, edits, deleted messages, read
   receipts, sender names, and group pictures. Older messages load as you
   scroll up, first from the local archive and then from your phone.
+  Group messages show two gray checks after every recipient has received
+  them, and blue checks after every recipient has read them. The recipient
+  list and individual receipts are saved locally; later membership changes
+  do not change that list. If the original recipients are unknown, ZapFast
+  waits for the phone's aggregate status instead of guessing from one reader.
 - **WhatsApp formatting.** Bold, italic, strikethrough, code, lists, quotes,
   mentions, and link previews are supported. Links are clickable. Emoji use
   the desktop's color emoji font, with a bundled fallback, and emoji-only
@@ -114,6 +119,11 @@ Builds for every release are on the
 | Linux x86_64 and arm64 | `zapfast-vX.Y.Z-<target>.tar.gz`, with the desktop file and icon in `packaging/` |
 | Windows x64 and arm64 | `zapfast-vX.Y.Z-<target>-setup.exe` (no administrator rights needed), or the `.zip` |
 | macOS, universal | `zapfast-vX.Y.Z-macos-universal.dmg` |
+
+On macOS, the rounded Dock icon matches the app bundle. Native menus provide
+Settings, editing, search, view controls, and window commands. The traffic
+lights share the chat header, leaving more room for conversations in a normal
+window. Settings is also available with `⌘,`.
 
 The macOS release process signs the app with Developer ID, submits the DMG
 to Apple's notarization service, and staples and validates its ticket before

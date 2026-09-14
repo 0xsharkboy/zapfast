@@ -2,7 +2,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use zapfast::{app, backend, paths, settings, single_instance, util};
+use zapfast::{app, backend, paths, settings, single_instance};
 
 use clap::Parser;
 
@@ -18,6 +18,11 @@ struct Cli {
     #[cfg(feature = "demo")]
     #[arg(long)]
     demo: bool,
+
+    /// Preview macOS content layout on another platform (demo only).
+    #[cfg(feature = "demo")]
+    #[arg(long, requires = "demo")]
+    demo_macos: bool,
 
     /// Demo view: `chat`, `empty`, `settings`, `login`,
     /// `pair`, `shortcuts`, `about`, `info`, `mention`, `light`, or a comma-separated
@@ -140,6 +145,10 @@ fn main() -> eframe::Result<()> {
                     .take()
                     .expect("application state present");
                 app.attach(&cc.egui_ctx);
+                #[cfg(feature = "demo")]
+                if cli.demo_macos {
+                    zapfast::theme::preview_macos(&cc.egui_ctx);
+                }
                 Ok(Box::new(Shell {
                     app: Some(app),
                     slot: std::sync::Arc::clone(&creator_slot),
@@ -341,6 +350,8 @@ impl eframe::App for Shell {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(app) = self.app.as_mut() {
             app.background_frame(ctx);
+            #[cfg(target_os = "macos")]
+            zapfast::macos::update_window(_frame, ctx, app.is_linked());
         }
         #[cfg(feature = "demo")]
         {
@@ -372,10 +383,25 @@ impl eframe::App for Shell {
 }
 
 fn app_icon() -> egui::IconData {
-    const SIZE: usize = 128;
-    egui::IconData {
-        rgba: util::app_icon_rgba(SIZE),
-        width: SIZE as u32,
-        height: SIZE as u32,
+    #[cfg(target_os = "macos")]
+    {
+        // eframe replaces the bundle's Dock icon with this viewport icon.
+        let image = image::load_from_memory(include_bytes!("../packaging/macos/icon-1024.png"))
+            .expect("bundled macOS icon")
+            .into_rgba8();
+        egui::IconData {
+            width: image.width(),
+            height: image.height(),
+            rgba: image.into_raw(),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        const SIZE: usize = 128;
+        egui::IconData {
+            rgba: zapfast::util::app_icon_rgba(SIZE),
+            width: SIZE as u32,
+            height: SIZE as u32,
+        }
     }
 }

@@ -1261,6 +1261,33 @@ impl Worker {
             _ => return,
         };
         let at = receipt.timestamp.timestamp();
+        if ChatKind::from_id(&chat) == ChatKind::Group {
+            let recipient = self.canonical(&receipt.source.sender);
+            if self.is_me(&recipient) {
+                return;
+            }
+            for id in &receipt.message_ids {
+                if !self
+                    .archive
+                    .message(&chat, id)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|row| row.from_me)
+                {
+                    continue;
+                }
+                match self
+                    .archive
+                    .group_receipt(&chat, id, &recipient, status, at)
+                {
+                    Ok(true) => self.emit_message(&chat, id),
+                    Ok(false) => {}
+                    Err(error) => log::warn!("could not file a group receipt: {error}"),
+                }
+            }
+            self.emit_chat(&chat);
+            return;
+        }
         let mut newest = 0;
         let mut changed = 0;
         for id in &receipt.message_ids {
@@ -2380,6 +2407,19 @@ impl Worker {
             Command::AvatarFailed { id, full } => {
                 *self.pending_avatars.entry((id, full)).or_insert(0) += 1;
             }
+            Command::GroupRecipients {
+                chat,
+                id,
+                recipients,
+                lids,
+                stored,
+            } => {
+                for (lid, pn) in lids {
+                    self.learn_lid(&lid, &pn);
+                }
+                let saved = self.save_group_recipients(&chat, &id, &recipients);
+                let _ = stored.send(saved);
+            }
             Command::GroupInfo {
                 chat,
                 name,
@@ -2391,6 +2431,25 @@ impl Worker {
                     self.archive
                         .set_group_info(&chat, name.as_deref(), &participants, read_only);
                 self.emit_chat(&chat);
+            }
+        }
+    }
+
+    /// Save the same audience the protocol library uses to encrypt the send.
+    fn save_group_recipients(&self, chat: &str, id: &str, recipients: &[String]) -> bool {
+        let recipients: Vec<_> = recipients
+            .iter()
+            .map(|id| self.canonical_str(id))
+            .filter(|id| !self.is_me(id))
+            .collect();
+        match self
+            .archive
+            .snapshot_group_recipients(chat, id, &recipients)
+        {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("could not save the group message audience: {error}");
+                false
             }
         }
     }
@@ -2456,16 +2515,14 @@ impl Worker {
             thumbnail: None,
         };
         self.store_message(row, Some(message.encode_to_vec()), None);
-        let commands = self.commands.clone();
-        tokio::spawn(async move {
-            let options = SendOptions::default().with_message_id(id.clone());
-            let error = client
-                .send_message_with_options(jid, message, options)
-                .await
-                .err()
-                .map(|error| error.to_string());
-            let _ = commands.send(Command::Sent { chat, id, error });
-        });
+        tokio::spawn(send_outgoing(
+            client,
+            self.commands.clone(),
+            chat,
+            jid,
+            id,
+            message,
+        ));
     }
 
     fn forward_message(&mut self, from_chat: ChatId, message_id: String, to_chat: ChatId) {
@@ -2514,20 +2571,14 @@ impl Worker {
             thumbnail,
         );
         self.store_message(row, Some(message.encode_to_vec()), None);
-        let commands = self.commands.clone();
-        tokio::spawn(async move {
-            let options = SendOptions::default().with_message_id(id.clone());
-            let error = client
-                .send_message_with_options(jid, message, options)
-                .await
-                .err()
-                .map(|error| error.to_string());
-            let _ = commands.send(Command::Sent {
-                chat: to_chat,
-                id,
-                error,
-            });
-        });
+        tokio::spawn(send_outgoing(
+            client,
+            self.commands.clone(),
+            to_chat,
+            jid,
+            id,
+            message,
+        ));
     }
 
     fn mark_read(&mut self, chat: ChatId, receipts: bool) {
@@ -3598,16 +3649,14 @@ impl Worker {
         };
         let id = row.id.clone();
         self.store_message(row, Some(raw), None);
-        let commands = self.commands.clone();
-        tokio::spawn(async move {
-            let options = SendOptions::default().with_message_id(id.clone());
-            let error = client
-                .send_message_with_options(jid, message, options)
-                .await
-                .err()
-                .map(|error| error.to_string());
-            let _ = commands.send(Command::Sent { chat, id, error });
-        });
+        tokio::spawn(send_outgoing(
+            client,
+            self.commands.clone(),
+            chat,
+            jid,
+            id,
+            message,
+        ));
     }
 
     fn react(&mut self, chat: ChatId, id: String, emoji: String) {
@@ -3637,6 +3686,70 @@ impl Worker {
 }
 
 // --- free helpers ----------------------------------------------------------
+
+async fn send_outgoing(
+    client: Arc<Client>,
+    commands: mpsc::UnboundedSender<Command>,
+    chat: ChatId,
+    jid: Jid,
+    id: String,
+    message: wa::Message,
+) {
+    let result = async {
+        if jid.is_group() {
+            // Uses whatsapp-rust's send cache; only a miss queries the server,
+            // exactly as encryption would. No separate burst of metadata queries.
+            let group = client
+                .groups()
+                .query_info(&jid)
+                .await
+                .map_err(|error| error.to_string())?;
+            let lids = group
+                .participants
+                .iter()
+                .filter(|jid| jid.is_lid())
+                .filter_map(|lid| {
+                    group
+                        .phone_jid_for_lid_user(lid.user_base())
+                        .map(|pn| (lid.user_base().to_owned(), pn.user_base().to_owned()))
+                })
+                .collect();
+            let recipients = group
+                .participants
+                .iter()
+                .map(Jid::to_non_ad_string)
+                .collect();
+            let (stored, mut saved) = mpsc::unbounded_channel();
+            commands
+                .send(Command::GroupRecipients {
+                    chat: chat.clone(),
+                    id: id.clone(),
+                    recipients,
+                    lids,
+                    stored,
+                })
+                .map_err(|_| "The application is shutting down".to_owned())?;
+            if saved.recv().await != Some(true) {
+                return Err("Could not save the group message recipients".to_owned());
+            }
+        }
+        client
+            .send_message_with_options(
+                jid,
+                message,
+                SendOptions::default().with_message_id(id.clone()),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+    .await;
+    let _ = commands.send(Command::Sent {
+        chat,
+        id,
+        error: result.err(),
+    });
+}
 
 fn forwarded_row(
     mut source: Message,
@@ -4592,7 +4705,12 @@ fn parse_conversation(conversation: wa::Conversation) -> ParsedChat {
         } else {
             Delivery::None
         };
-        if from_me && status < Delivery::Read {
+        // A group's individual receipts may be only a partial list. Only the
+        // phone's aggregate status proves delivery/read for historical groups.
+        if from_me
+            && ChatKind::from_id(&conversation.id) != ChatKind::Group
+            && status < Delivery::Read
+        {
             if info
                 .user_receipt
                 .iter()
@@ -4999,6 +5117,122 @@ mod receipt_tests {
             .r#type(kind)
             .offline(false)
             .build()
+    }
+
+    #[test]
+    fn group_checks_wait_for_every_recipient_and_do_not_read_earlier_messages() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        let group = "123-456@g.us";
+        let other = "12025550123@s.whatsapp.net";
+        worker.archive.ensure_chat(group, "Group").unwrap();
+        worker
+            .archive
+            .set_group_info(
+                group,
+                None,
+                &[ME.into(), PEER_LID.into(), other.into()],
+                false,
+            )
+            .unwrap();
+        for (id, timestamp) in [("old", 100), ("new", 200)] {
+            worker.store_message(
+                Message {
+                    chat: group.into(),
+                    ..own_message(id, timestamp)
+                },
+                None,
+                None,
+            );
+            assert!(worker.save_group_recipients(
+                group,
+                id,
+                &[ME.into(), PEER_LID.into(), other.into()]
+            ));
+        }
+        let send = |worker: &mut Worker, sender: &str, kind| {
+            let mut receipt = receipt(group, &["new"], kind);
+            receipt.source.sender = sender.parse().unwrap();
+            receipt.source.is_group = true;
+            worker.on_receipt(&receipt);
+        };
+        let status =
+            |worker: &Worker, id| worker.archive.message(group, id).unwrap().unwrap().status;
+        send(&mut worker, PEER_LID, ReceiptType::Read);
+        send(&mut worker, ME, ReceiptType::Read);
+        send(&mut worker, "12025550999@s.whatsapp.net", ReceiptType::Read);
+        assert_eq!(status(&worker, "new"), Delivery::Sent);
+        // A new alias or device is not another reader. Learning a mapping after
+        // the first receipt must also merge its saved audience entry.
+        worker.learn_lid("167650256810092", "4917663430455");
+        send(&mut worker, PEER, ReceiptType::Read);
+        send(
+            &mut worker,
+            "4917663430455:2@s.whatsapp.net",
+            ReceiptType::Read,
+        );
+        assert_eq!(status(&worker, "new"), Delivery::Sent);
+        send(&mut worker, other, ReceiptType::Delivered);
+        assert_eq!(status(&worker, "new"), Delivery::Delivered);
+        // Departures and joins do not rewrite the message's original audience.
+        worker
+            .archive
+            .set_group_info(group, None, &[ME.into(), PEER.into()], false)
+            .unwrap();
+        send(&mut worker, PEER, ReceiptType::Read);
+        assert_eq!(status(&worker, "new"), Delivery::Delivered);
+        send(&mut worker, other, ReceiptType::Read);
+        assert_eq!(status(&worker, "new"), Delivery::Read);
+        assert_eq!(status(&worker, "old"), Delivery::Sent);
+        send(&mut worker, PEER, ReceiptType::Delivered);
+        assert_eq!(status(&worker, "new"), Delivery::Read);
+    }
+
+    #[test]
+    fn partial_group_history_receipts_do_not_override_the_phone_aggregate() {
+        use wa::web_message_info::Status;
+        let parsed = |chat: &str, status| {
+            parse_conversation(wa::Conversation {
+                id: chat.into(),
+                messages: vec![wa::HistorySyncMsg {
+                    message: MessageField::some(wa::WebMessageInfo {
+                        key: MessageField::some(wa::MessageKey {
+                            id: Some("history".into()),
+                            from_me: Some(true),
+                            ..Default::default()
+                        }),
+                        message: MessageField::some(wa::Message {
+                            conversation: Some("hello".into()),
+                            ..Default::default()
+                        }),
+                        status: Some(status),
+                        user_receipt: vec![wa::UserReceipt {
+                            user_jid: PEER.into(),
+                            read_timestamp: Some(123),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+        };
+        assert_eq!(
+            parsed("123-456@g.us", Status::SERVER_ACK).messages[0].status,
+            Delivery::Sent
+        );
+        assert_eq!(
+            parsed("123-456@g.us", Status::DELIVERY_ACK).messages[0].status,
+            Delivery::Delivered
+        );
+        assert_eq!(
+            parsed("123-456@g.us", Status::READ).messages[0].status,
+            Delivery::Read
+        );
+        assert_eq!(
+            parsed(PEER, Status::SERVER_ACK).messages[0].status,
+            Delivery::Read
+        );
     }
 
     fn incoming(id: &str, timestamp: i64) -> Message {

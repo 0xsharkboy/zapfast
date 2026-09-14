@@ -134,8 +134,14 @@ protocol. These notes are for coding agents and new contributors.
   launch surfaces the first. `src/notify.rs` sends desktop notifications
   for `Event::Incoming` (live messages from others, not history) when the
   reader is away from that chat. macOS has no title bar: the content runs
-  to the top and `ui::titlebar_strip` leaves `theme::titlebar_inset` for
-  the traffic lights and drags the window.
+  to the top. `src/macos.rs` keeps native application menus alive across window
+  recreation and aligns traffic lights with the chat header. Linking retains
+  `ui::titlebar_strip`; other headers reserve horizontal space for the buttons.
+- Group delivery uses `archive::receipts`: save the recipients when filing an
+  outgoing message, record each person's receipt, then take the least advanced
+  recipient. Never promote a group from one reader, apply a receipt to earlier
+  messages, or infer a historical audience from current membership. History
+  trusts the phone's aggregate status, not a partial `user_receipt` list.
 - The name and icon under the phone's Linked devices come from
   `DevicePropsOverride` in `start_bot` (`os` is the name shown, the
   platform type picks the icon); WhatsApp reads them at pairing only, so a

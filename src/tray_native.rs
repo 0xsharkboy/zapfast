@@ -7,7 +7,11 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
-use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
+#[cfg(windows)]
+use tray_icon::menu::MenuEvent;
+#[cfg(any(windows, test))]
+use tray_icon::menu::MenuId;
+use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,6 +26,7 @@ type Wake = Arc<dyn Fn() + Send + Sync>;
 const SHOW: &str = "show";
 const QUIT: &str = "quit";
 
+#[cfg(any(windows, test))]
 fn command_for(id: &MenuId) -> Option<TrayCommand> {
     match id.0.as_str() {
         SHOW => Some(TrayCommand::ShowHide),
@@ -60,15 +65,18 @@ fn build(sender: Sender<TrayCommand>, wake: Wake) -> Result<Item, Box<dyn std::e
         .with_menu_on_left_click(false);
     let icon = builder.build()?;
 
-    let menu_sender = sender.clone();
-    let menu_wake = Arc::clone(&wake);
-    MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-        if let Some(command) = command_for(&event.id)
-            && menu_sender.send(command).is_ok()
-        {
-            menu_wake();
-        }
-    }));
+    #[cfg(windows)]
+    {
+        let menu_sender = sender.clone();
+        let menu_wake = Arc::clone(&wake);
+        MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
+            if let Some(command) = command_for(&event.id)
+                && menu_sender.send(command).is_ok()
+            {
+                menu_wake();
+            }
+        }));
+    }
     tray_icon::TrayIconEvent::set_event_handler(Some(move |event: tray_icon::TrayIconEvent| {
         if let tray_icon::TrayIconEvent::Click {
             button: tray_icon::MouseButton::Left,

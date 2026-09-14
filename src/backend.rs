@@ -294,6 +294,14 @@ pub enum Command {
         raw: Vec<u8>,
     },
     /// Internal group metadata result.
+    GroupRecipients {
+        chat: ChatId,
+        id: String,
+        recipients: Vec<String>,
+        lids: Vec<(String, String)>,
+        stored: tokio::sync::mpsc::UnboundedSender<bool>,
+    },
+    /// Internal group metadata result.
     GroupInfo {
         chat: ChatId,
         name: Option<String>,

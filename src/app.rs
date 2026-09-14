@@ -559,6 +559,8 @@ impl App {
         if let Some(tray) = &mut self.tray {
             tray.attach();
         }
+        #[cfg(target_os = "macos")]
+        crate::macos::attach(ctx);
     }
 
     pub fn is_connected(&self) -> bool {
@@ -2153,6 +2155,9 @@ impl App {
             self.window_focused = false;
         }
         self.handle_tray();
+        #[cfg(target_os = "macos")]
+        self.actions
+            .extend(crate::macos::drain(ctx, self.window_hidden));
         self.handle_control_commands();
         self.handle_notification_opens();
         self.handle_events();

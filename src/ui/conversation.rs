@@ -29,10 +29,17 @@ const BODY_SIZE: f32 = 14.5;
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let Some(chat) = app.current_chat().cloned() else {
+        super::standalone_header(app, ui);
+        if theme::macos_chrome(ui.ctx()) {
+            super::banner(app, ui);
+        }
         empty(app, ui);
         return;
     };
     header(app, ui, &chat);
+    if theme::macos_chrome(ui.ctx()) {
+        super::banner(app, ui);
+    }
     composer(app, ui, &chat);
     messages(app, ui, &chat);
 }
@@ -88,9 +95,19 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                 .inner_margin(Margin::symmetric(14, 8)),
         )
         .show(ui, |ui| {
+            if theme::macos_chrome(ui.ctx()) {
+                let mut drag = ui.max_rect();
+                if !app.sidebar_visible {
+                    drag.min.x += theme::traffic_light_inset(ui.ctx());
+                }
+                super::titlebar_drag(ui, drag);
+            }
             ui.horizontal(|ui| {
                 // Give both rows a fixed height so their contents align.
                 ui.set_min_height(HEADER_ROW);
+                if !app.sidebar_visible && theme::macos_chrome(ui.ctx()) {
+                    ui.add_space((theme::traffic_light_inset(ui.ctx()) - 14.0).max(0.0));
+                }
                 if !app.sidebar_visible
                     && theme::icon_button(
                         ui,

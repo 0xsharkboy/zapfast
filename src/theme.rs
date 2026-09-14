@@ -766,11 +766,37 @@ pub fn blend(a: Color32, b: Color32, t: f32) -> Color32 {
     )
 }
 
-/// macOS traffic-light inset; zero on other platforms.
+/// Native macOS layout, also selectable in offline layout previews.
+pub fn macos_chrome(ctx: &egui::Context) -> bool {
+    #[cfg(any(test, feature = "demo"))]
+    if ctx.data(|data| {
+        data.get_temp::<bool>(egui::Id::new("macos-preview"))
+            .unwrap_or(false)
+    }) {
+        return true;
+    }
+    let _ = ctx;
+    cfg!(target_os = "macos")
+}
+
+#[cfg(any(test, feature = "demo"))]
+pub fn preview_macos(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new("macos-preview"), true));
+}
+
+/// Horizontal clearance for native buttons; they do not scale with UI zoom.
+pub fn traffic_light_inset(ctx: &egui::Context) -> f32 {
+    if macos_chrome(ctx) && !ctx.input(|input| input.viewport().fullscreen.unwrap_or(false)) {
+        84.0 / ctx.zoom_factor()
+    } else {
+        0.0
+    }
+}
+
+/// Traffic-light strip used only while linking, before the chat header exists.
 pub fn titlebar_inset(ctx: &egui::Context) -> f32 {
-    if cfg!(target_os = "macos") && !ctx.input(|input| input.viewport().fullscreen.unwrap_or(false))
-    {
-        28.0
+    if macos_chrome(ctx) && !ctx.input(|input| input.viewport().fullscreen.unwrap_or(false)) {
+        28.0 / ctx.zoom_factor()
     } else {
         0.0
     }

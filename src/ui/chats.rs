@@ -13,7 +13,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let panel = egui::Panel::left("chats")
         .resizable(true)
         .default_size(app.settings.sidebar_width)
-        .size_range(260.0..=520.0)
+        .size_range(if theme::macos_chrome(ui.ctx()) {
+            (theme::traffic_light_inset(ui.ctx()) + 210.0).max(280.0)..=520.0
+        } else {
+            260.0..=520.0
+        })
         .show_separator_line(false)
         .frame(Frame::new().fill(palette.panel).inner_margin(Margin::ZERO));
     let response = panel.show(ui, |ui| {
@@ -35,6 +39,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
 }
 
 fn header(app: &mut App, ui: &mut egui::Ui) {
+    if theme::macos_chrome(ui.ctx()) {
+        macos_header(app, ui);
+        return;
+    }
     let palette = app.palette;
     Frame::new()
         .inner_margin(Margin {
@@ -123,6 +131,83 @@ fn header(app: &mut App, ui: &mut egui::Ui) {
             let width = ui.available_width();
             let mut text = app.search.clone();
             let response = widgets::search_field(ui, &palette, id, &mut text, "Search", width);
+            if text != app.search {
+                app.actions.push(Action::Search(text));
+            }
+            if app.focus_search {
+                app.focus_search = false;
+                response.request_focus();
+            }
+        });
+}
+
+fn macos_header(app: &mut App, ui: &mut egui::Ui) {
+    let palette = app.palette;
+    let inset = theme::traffic_light_inset(ui.ctx());
+    let mut drag = ui.max_rect();
+    drag.min.x += inset;
+    drag.max.y = drag.min.y + 60.0;
+    super::titlebar_drag(ui, drag);
+    Frame::new()
+        .inner_margin(Margin::symmetric(14, 8))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.set_min_height(44.0);
+                ui.add_space((inset - 14.0).max(0.0));
+                if app.show_archived {
+                    if theme::icon_button(
+                        ui,
+                        Icon::ArrowLeft,
+                        18.0,
+                        palette.secondary,
+                        palette.text,
+                        "Back to chats",
+                    )
+                    .clicked()
+                    {
+                        app.show_archived = false;
+                    }
+                    theme::text(ui, "Archived", theme::bold(16.0), palette.text);
+                } else {
+                    theme::text(ui, "Chats", theme::bold(20.0), palette.text);
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if theme::icon_button(
+                        ui,
+                        Icon::SquarePen,
+                        18.0,
+                        palette.secondary,
+                        palette.text,
+                        "New contact (⌘N)",
+                    )
+                    .clicked()
+                    {
+                        app.actions.push(Action::ShowDialog(Dialog::NewContact));
+                    }
+                    if theme::icon_button(
+                        ui,
+                        Icon::PanelLeft,
+                        18.0,
+                        palette.secondary,
+                        palette.text,
+                        "Hide the chat list (⌘B)",
+                    )
+                    .clicked()
+                    {
+                        app.actions.push(Action::ToggleSidebar);
+                    }
+                });
+            });
+            ui.add_space(6.0);
+            let mut text = app.search.clone();
+            let response = widgets::search_field(
+                ui,
+                &palette,
+                egui::Id::new("chat-search"),
+                &mut text,
+                "Search",
+                ui.available_width(),
+            );
             if text != app.search {
                 app.actions.push(Action::Search(text));
             }

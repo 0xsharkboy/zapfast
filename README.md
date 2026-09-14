@@ -6,7 +6,7 @@ with [egui](https://github.com/emilk/egui). It uses
 protocol. It links to your phone as a companion device, starts in well under a
 second, and has no browser engine.
 
-ZapFast is a sibling of [Fastpotify](https://github.com/crmne/fastpotify),
+ZapFast is a sibling of [Spotifast](https://spotifast.rocks),
 with the same native UI for a different service.
 
 ![ZapFast showing a chat with a photo, a document, a voice message, a quoted reply, and a link](docs/screenshot.png)

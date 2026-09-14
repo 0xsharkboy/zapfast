@@ -64,8 +64,8 @@ cannot accept that risk.
 ZapFast connects through
 [whatsapp-rust](https://github.com/oxidezap/whatsapp-rust), which grew out
 of the [whatsmeow](https://github.com/tulir/whatsmeow) lineage. WhatsApp
-Web defines the companion-device model. [Fastpotify](https://fastpotify.rocks)
-is a related native client for Spotify.
+Web defines the companion-device model. ZapFast is a sibling of
+[Spotifast](https://spotifast.rocks), a native client for Spotify.
 
 ZapFast is an independent project, not affiliated with or endorsed by
 WhatsApp LLC or Meta. WhatsApp is a trademark of WhatsApp LLC.

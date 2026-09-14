@@ -32,12 +32,13 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns "$iconset" -o "$app/Contents/Resources/zapfast.icns"
 
-# Sign with the configured identity or an ad-hoc signature.
+# Attach the microphone entitlement before native-packages preserves it when
+# replacing the ad-hoc signature with a hardened Developer ID signature.
 if [ -n "${CODESIGN_IDENTITY:-}" ]; then
     codesign --force --timestamp --options runtime \
-        --sign "$CODESIGN_IDENTITY" "$app"
+        --entitlements "$here/entitlements.plist" --sign "$CODESIGN_IDENTITY" "$app"
 else
-    codesign --force --sign - "$app"
+    codesign --force --entitlements "$here/entitlements.plist" --sign - "$app"
 fi
 codesign --verify --strict "$app"
 

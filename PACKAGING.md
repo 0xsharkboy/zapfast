@@ -62,6 +62,12 @@ pin together. Applications need no packaging Gemfile, lockfile or Ruby wrapper.
 
 ## Automatic macOS notarization
 
+`packaging/macos/entitlements.plist` grants microphone access under the hardened
+runtime, and `Info.plist` supplies the permission prompt. `bundle.sh` embeds the
+entitlement in its initial signature so native-packages preserves it when signing
+with Developer ID. After notarization, `verify.sh` mounts the final DMG and checks
+its ticket, Gatekeeper acceptance, both architectures, and microphone metadata.
+
 The macOS release job builds the app first, then uses
 `native-packages.macos.yaml` and `packaging/macos/dmg.rb` to package it.
 The shared gem signs its owned input copy, notarizes the DMG, staples and validates

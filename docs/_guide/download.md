@@ -9,8 +9,9 @@ nav_order: 1
 {% assign app = site.release_app_name %}
 {% assign base = "https://github.com/crmne/zapfast/releases/download/v" | append: v %}
 
-ZapFast was previously called FastsApp. The current published release still
-uses that name; builds from source use ZapFast.
+ZapFast was previously called FastsApp. Version 0.13.0 introduces the new
+package and executable names. Your existing session and local data move
+automatically when you first start ZapFast; quit FastsApp before upgrading.
 
 The current version is **v{{ v }}**. SHA-256 checksums are in
 [checksums.txt]({{ base }}/checksums.txt). Older versions are on the
@@ -47,26 +48,11 @@ One download for both Apple Silicon and Intel:
 
 Open it and drag **{{ app }}** to Applications.
 
-### First open on macOS
+The app is signed with Developer ID and notarized by Apple. The DMG includes
+a validated notarization ticket.
 
-This build is not notarized, so macOS blocks it the first time. Allow it in
-Privacy & Security:
-
-1. Double-click **{{ app }}** in Applications. macOS says it cannot be
-   opened because Apple cannot check it for malicious software. Click
-   **Done**, not **Move to Trash**.
-2. Open **System Settings**, then **Privacy & Security**.
-3. Scroll down to the **Security** section, find *"{{ app }} was blocked to
-   protect your Mac"*, and click **Open Anyway**.
-4. Authenticate, then click **Open Anyway** once more.
-
-You can also clear the quarantine flag:
-
-```sh
-xattr -dr com.apple.quarantine /Applications/{{ app }}.app
-```
-
-The `-r` also clears the flag from files inside the app bundle.
+When upgrading from FastsApp, remove the old FastsApp application bundle
+after installing ZapFast.
 
 ## Windows
 

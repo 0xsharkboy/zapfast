@@ -1,8 +1,7 @@
 title: ZapFast
-zapfast_version: "0.12.1"
-# Published assets still use the old name. Change these only after a ZapFast release exists.
-release_asset_prefix: fastsapp
-release_app_name: FastsApp
+zapfast_version: "0.13.0"
+release_asset_prefix: zapfast
+release_app_name: ZapFast
 description: A native WhatsApp client for Linux, macOS, and Windows, written in Rust.
 lang: en-US
 timezone: Europe/Berlin

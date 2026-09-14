@@ -2,11 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>FastsApp</string>
-    <key>CFBundleDisplayName</key><string>FastsApp</string>
+    <key>CFBundleName</key><string>ZapFast</string>
+    <key>CFBundleDisplayName</key><string>ZapFast</string>
+    <!-- Keep the installed app identity across the rename. -->
     <key>CFBundleIdentifier</key><string>me.paolino.fastsapp</string>
-    <key>CFBundleExecutable</key><string>fastsapp</string>
-    <key>CFBundleIconFile</key><string>fastsapp</string>
+    <key>CFBundleExecutable</key><string>zapfast</string>
+    <key>CFBundleIconFile</key><string>zapfast</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>__VERSION__</string>
     <key>CFBundleVersion</key><string>__VERSION__</string>

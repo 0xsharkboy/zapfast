@@ -5,30 +5,33 @@ tool:
   version: 0.5.1
   nfpm: 2.47.0
 nfpm:
-  name: fastsapp
+  name: zapfast
   maintainer: Carmine Paolino <carmine@paolino.me>
-  homepage: https://github.com/crmne/fastsapp
+  homepage: https://zapfast.rocks
   description: Fast native WhatsApp client
   license: MIT
+  provides: [fastsapp]
+  conflicts: [fastsapp]
+  replaces: [fastsapp]
   contents:
-  - src: "@PAYLOAD@/fastsapp-v@VERSION@-@TARGET@/fastsapp"
-    dst: "/usr/bin/fastsapp"
+  - src: "@PAYLOAD@/zapfast-v@VERSION@-@TARGET@/zapfast"
+    dst: "/usr/bin/zapfast"
     file_info:
       mode: 493
-  - src: "@PAYLOAD@/fastsapp-v@VERSION@-@TARGET@/LICENSE"
-    dst: "/usr/share/licenses/fastsapp/LICENSE"
+  - src: "@PAYLOAD@/zapfast-v@VERSION@-@TARGET@/LICENSE"
+    dst: "/usr/share/licenses/zapfast/LICENSE"
     file_info:
       mode: 420
-  - src: "@PAYLOAD@/fastsapp-v@VERSION@-@TARGET@/README.md"
-    dst: "/usr/share/doc/fastsapp/README.md"
+  - src: "@PAYLOAD@/zapfast-v@VERSION@-@TARGET@/README.md"
+    dst: "/usr/share/doc/zapfast/README.md"
     file_info:
       mode: 420
-  - src: "@PAYLOAD@/fastsapp-v@VERSION@-@TARGET@/packaging/applications/fastsapp.desktop"
-    dst: "/usr/share/applications/fastsapp.desktop"
+  - src: "@PAYLOAD@/zapfast-v@VERSION@-@TARGET@/packaging/applications/zapfast.desktop"
+    dst: "/usr/share/applications/zapfast.desktop"
     file_info:
       mode: 420
-  - src: "@PAYLOAD@/fastsapp-v@VERSION@-@TARGET@/packaging/icons/fastsapp.svg"
-    dst: "/usr/share/icons/hicolor/scalable/apps/fastsapp.svg"
+  - src: "@PAYLOAD@/zapfast-v@VERSION@-@TARGET@/packaging/icons/zapfast.svg"
+    dst: "/usr/share/icons/hicolor/scalable/apps/zapfast.svg"
     file_info:
       mode: 420
   overrides:
@@ -64,8 +67,8 @@ targets:
     - deb
     - rpm
     input:
-      local: dist/fastsapp-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
-      release_asset: fastsapp-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+      local: dist/zapfast-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+      release_asset: zapfast-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
   linux-arm64:
     platform: linux
     arch: arm64
@@ -75,61 +78,61 @@ targets:
     - deb
     - rpm
     input:
-      local: dist/fastsapp-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
-      release_asset: fastsapp-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+      local: dist/zapfast-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+      release_asset: zapfast-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
 release:
-  repository: crmne/fastsapp
+  repository: crmne/zapfast
   checksums: checksums.txt
 assets:
   AMD64:
-    file: fastsapp-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
-    local: dist/fastsapp-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+    file: zapfast-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+    local: dist/zapfast-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
   ARM64:
-    file: fastsapp-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
-    local: dist/fastsapp-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+    file: zapfast-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+    local: dist/zapfast-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
   SOURCE:
-    file: fastsapp-@VERSION@.tar.gz
-    url: https://github.com/crmne/fastsapp/archive/refs/tags/v@VERSION@.tar.gz
+    file: zapfast-@VERSION@.tar.gz
+    url: https://github.com/crmne/zapfast/archive/refs/tags/v@VERSION@.tar.gz
     checksummed: false
-    local: dist/fastsapp-@VERSION@.tar.gz
+    local: dist/zapfast-@VERSION@.tar.gz
 templates:
-  arch/fastsapp/PKGBUILD: packaging/arch/fastsapp/PKGBUILD.in
-  arch/fastsapp/fastsapp.install: packaging/arch/fastsapp.install
-  arch/fastsapp-bin/PKGBUILD: packaging/arch/fastsapp-bin/PKGBUILD.in
-  arch/fastsapp-bin/fastsapp-bin.install: packaging/arch/fastsapp.install
-  arch/fastsapp-git/PKGBUILD: packaging/arch/fastsapp-git/PKGBUILD.in
-  arch/fastsapp-git/fastsapp-git.install: packaging/arch/fastsapp.install
+  arch/zapfast/PKGBUILD: packaging/arch/zapfast/PKGBUILD.in
+  arch/zapfast/zapfast.install: packaging/arch/zapfast.install
+  arch/zapfast-bin/PKGBUILD: packaging/arch/zapfast-bin/PKGBUILD.in
+  arch/zapfast-bin/zapfast-bin.install: packaging/arch/zapfast.install
+  arch/zapfast-git/PKGBUILD: packaging/arch/zapfast-git/PKGBUILD.in
+  arch/zapfast-git/zapfast-git.install: packaging/arch/zapfast.install
 repositories:
   aur-source:
     group: aur
-    url: https://aur.archlinux.org/fastsapp.git
-    push_url: ssh://aur@aur.archlinux.org/fastsapp.git
+    url: https://aur.archlinux.org/zapfast.git
+    push_url: ssh://aur@aur.archlinux.org/zapfast.git
     branch: master
     package_path: "."
     files:
-      arch/fastsapp: "."
+      arch/zapfast: "."
     version_file: ".SRCINFO"
     version_pattern: "^\\s*pkgver = (\\S+)"
     publish: push
   aur-bin:
     group: aur
-    url: https://aur.archlinux.org/fastsapp-bin.git
-    push_url: ssh://aur@aur.archlinux.org/fastsapp-bin.git
+    url: https://aur.archlinux.org/zapfast-bin.git
+    push_url: ssh://aur@aur.archlinux.org/zapfast-bin.git
     branch: master
     package_path: "."
     files:
-      arch/fastsapp-bin: "."
+      arch/zapfast-bin: "."
     version_file: ".SRCINFO"
     version_pattern: "^\\s*pkgver = (\\S+)"
     publish: push
   aur-git:
     group: aur
-    url: https://aur.archlinux.org/fastsapp-git.git
-    push_url: ssh://aur@aur.archlinux.org/fastsapp-git.git
+    url: https://aur.archlinux.org/zapfast-git.git
+    push_url: ssh://aur@aur.archlinux.org/zapfast-git.git
     branch: master
     package_path: "."
     files:
-      arch/fastsapp-git: "."
+      arch/zapfast-git: "."
     version_file: ".SRCINFO"
     version_pattern: "^\\s*pkgver = (\\S+)"
     publish: push

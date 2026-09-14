@@ -1,10 +1,10 @@
 ---
 layout: home
-title: FastsApp
+title: ZapFast
 description: A native WhatsApp client for Linux, macOS, and Windows, written in Rust.
 permalink: /
 hero:
-  name: FastsApp
+  name: ZapFast
   text: WhatsApp, native and fast
   tagline: A small WhatsApp client for chats, voice messages, attachments, and notifications on Linux, macOS, and Windows.
   actions:
@@ -12,14 +12,14 @@ hero:
       text: Download
       link: /download/
     - theme: alt
-      text: What is FastsApp?
-      link: /what-is-fastsapp/
+      text: What is ZapFast?
+      link: /what-is-zapfast/
     - theme: alt
       text: GitHub
-      link: https://github.com/crmne/fastsapp
+      link: https://github.com/crmne/zapfast
   image:
     src: /screenshot.png
-    alt: "FastsApp showing a chat with a photo, a document, a voice message, a quoted reply, and a link preview"
+    alt: "ZapFast showing a chat with a photo, a document, a voice message, a quoted reply, and a link preview"
     width: 1387
     height: 1040
 
@@ -35,14 +35,14 @@ features:
     details: Photos, GIFs, stickers, documents, polls, locations, and link previews appear in the chat. Add captions before sending files.
   - icon: 🔔
     title: Background mode
-    details: Closing the window keeps FastsApp linked in the tray. Notifications show the chat picture, and muted chats stay quiet.
+    details: Closing the window keeps ZapFast linked in the tray. Notifications show the chat picture, and muted chats stay quiet.
   - icon: ⌨️
     title: Keyboard shortcuts
     details: Search, switch chats, reply, and record with shortcuts. Select and copy text, including across messages.
   - icon: 🔓
     title: Open source
     details: MIT-licensed Rust built with egui and whatsapp-rust. The linking process is documented.
-    link: https://github.com/crmne/fastsapp
+    link: https://github.com/crmne/zapfast
     link_text: Read the source
 ---
 

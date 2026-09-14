@@ -4,12 +4,12 @@ tool:
   version: 0.5.1
   nfpm: 2.47.0
 nfpm:
-  name: fastsapp
+  name: zapfast
   maintainer: Carmine Paolino <carmine@paolino.me>
-  description: FastsApp macOS application
+  description: ZapFast macOS application
   license: MIT
 release:
-  repository: crmne/fastsapp
+  repository: crmne/zapfast
   prereleases: true
 targets:
   macos-universal:
@@ -21,4 +21,4 @@ targets:
       local: dist/macos-input
     native:
       command: [ruby, packaging/macos/dmg.rb, '@PAYLOAD@', '@PACKAGE@']
-      output: 'fastsapp-@TAG@-macos-universal.dmg'
+      output: 'zapfast-@TAG@-macos-universal.dmg'

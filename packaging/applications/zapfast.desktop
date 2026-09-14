@@ -1,11 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=FastsApp
+Name=ZapFast
 GenericName=WhatsApp Client
 Comment=A native WhatsApp client
-Exec=fastsapp
-Icon=fastsapp
+Exec=zapfast
+Icon=zapfast
 Terminal=false
 Categories=Network;InstantMessaging;Chat;
 Keywords=whatsapp;chat;messaging;
-StartupWMClass=fastsapp
+StartupWMClass=zapfast

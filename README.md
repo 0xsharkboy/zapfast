@@ -1,17 +1,17 @@
-# FastsApp
+# ZapFast
 
-**WhatsApp, native and fast.** FastsApp is a WhatsApp client written in Rust
+**WhatsApp, native and fast.** ZapFast is a WhatsApp client written in Rust
 with [egui](https://github.com/emilk/egui). It uses
 [whatsapp-rust](https://github.com/oxidezap/whatsapp-rust) for the WhatsApp Web
 protocol. It links to your phone as a companion device, starts in well under a
 second, and has no browser engine.
 
-FastsApp is a sibling of [Fastpotify](https://github.com/crmne/fastpotify),
+ZapFast is a sibling of [Fastpotify](https://github.com/crmne/fastpotify),
 with the same native UI for a different service.
 
-![FastsApp showing a chat with a photo, a document, a voice message, a quoted reply, and a link](docs/screenshot.png)
+![ZapFast showing a chat with a photo, a document, a voice message, a quoted reply, and a link](docs/screenshot.png)
 
-See **[fastsapp.rocks](https://fastsapp.rocks)** for downloads and guides.
+See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
 
 ![A group chat with sender names and pictures, a photo with reactions, a reply with a mention, and a poll](docs/screenshot-group.png)
 
@@ -49,10 +49,10 @@ See **[fastsapp.rocks](https://fastsapp.rocks)** for downloads and guides.
   an emoji without leaving the composer, or `@` in a group to mention a member.
   Reply, react, edit, forward, delete, and check when a message was sent,
   delivered, or read.
-- **View attachments.** FastsApp downloads files up to 64 MB automatically or
+- **View attachments.** ZapFast downloads files up to 64 MB automatically or
   on click. Photos, stickers, GIFs, voice messages, audio, locations, contacts,
   polls, and link previews appear in the chat. Videos and documents open in
-  their default desktop apps. If an attachment has expired, FastsApp asks your
+  their default desktop apps. If an attachment has expired, ZapFast asks your
   phone to upload it again.
 - **Emoji, GIF, and sticker picker.** Search emoji and GIFs, use recent emoji
   and stickers, and save stickers with a right-click. Emoji autocomplete and
@@ -68,14 +68,14 @@ See **[fastsapp.rocks](https://fastsapp.rocks)** for downloads and guides.
   groups are read-only for non-admins.
 - **Presence.** See online, last-seen, and typing status, and send your typing
   status.
-- **Runs in the background.** Closing the window keeps FastsApp linked in the
+- **Runs in the background.** Closing the window keeps ZapFast linked in the
   system tray. Reopen it from the tray or by launching it again. Quit from the
   tray or with `Ctrl+Q`, or disable this behavior in Settings.
 - **Desktop notifications.** Get notifications with the chat picture when you
   are away from the open chat. Muted chats do not notify you. On Linux,
   clicking a notification opens the chat, and reading the chat here or on another
   device dismisses its outstanding notifications.
-- **Update notices.** FastsApp checks GitHub once a day and shows a download
+- **Update notices.** ZapFast checks GitHub once a day and shows a download
   link when a newer release is available. You can turn this off in Settings.
 - **Light and dark**, or follow the system. Zoom with Ctrl+plus and
   Ctrl+minus.
@@ -97,7 +97,8 @@ See **[fastsapp.rocks](https://fastsapp.rocks)** for downloads and guides.
 
 ## Installing
 
-On Arch Linux, FastsApp is in the AUR:
+ZapFast was previously called FastsApp. Published releases and AUR packages
+still use the old name; builds from this branch use ZapFast. On Arch Linux:
 
 ```sh
 yay -S fastsapp-bin      # the released build, ready made
@@ -106,7 +107,7 @@ yay -S fastsapp-git      # built from the latest commit
 ```
 
 Builds for every release are on the
-[releases page](https://github.com/crmne/fastsapp/releases):
+[releases page](https://github.com/crmne/zapfast/releases):
 
 | Platform | File |
 | --- | --- |
@@ -119,7 +120,7 @@ under **System Settings**, **Privacy & Security**.
 
 ### From source
 
-FastsApp needs Rust. `rust-toolchain.toml` pins the exact version. On Linux,
+ZapFast needs Rust. `rust-toolchain.toml` pins the exact version. On Linux,
 it also needs GUI development packages:
 
 ```sh
@@ -133,7 +134,7 @@ Then:
 
 ```sh
 cargo install --path .
-fastsapp
+zapfast
 ```
 
 The desktop file and icon are in `packaging/`.
@@ -162,16 +163,20 @@ to your phone and linked devices.
 
 | What | Linux | Notes |
 | --- | --- | --- |
-| Settings | `~/.config/fastsapp/settings.json` | JSON, safe to edit |
-| Device keys | `~/.local/state/fastsapp/session.db` | Owned by whatsapp-rust; deleting it unlinks |
-| Messages | `~/.local/state/fastsapp/archive.db` | SQLite; raw messages contain the keys needed to download attachments |
-| Attachments, avatars | `~/.cache/fastsapp/` | Safe to delete |
-| Saved stickers and packs | `~/.local/state/fastsapp/stickers/` | Plain WebP files; each pack is a folder |
-| Log of the last run | `~/.local/state/fastsapp/fastsapp.log` | `--verbose` for more |
+| Settings | `~/.config/zapfast/settings.json` | JSON, safe to edit |
+| Device keys | `~/.local/state/zapfast/session.db` | Owned by whatsapp-rust; deleting it unlinks |
+| Messages | `~/.local/state/zapfast/archive.db` | SQLite; raw messages contain the keys needed to download attachments |
+| Attachments, avatars | `~/.cache/zapfast/` | Safe to delete |
+| Saved stickers and packs | `~/.local/state/zapfast/stickers/` | Plain WebP files; each pack is a folder |
+| Log of the last run | `~/.local/state/zapfast/zapfast.log` | `--verbose` for more |
 
 macOS and Windows use the standard platform directories selected by the
-`directories` crate. On first start, FastsApp moves data from its old
-`fastwhatsapp` paths so the device remains linked.
+`directories` crate. On first start, ZapFast moves settings, the linked session,
+message archive, saved stickers, caches, and window state from `fastsapp`
+(or the earlier `fastwhatsapp`) paths. Existing ZapFast directories take
+precedence and are never overwritten. Quit FastsApp before starting ZapFast;
+if an older copy is still running, the new launch brings its window forward.
+Your phone may keep showing the old linked-device name until you link again.
 
 ## Developing
 
@@ -187,14 +192,16 @@ To include a default GIPHY key for GIF search, set it at build time. A key in
 Settings overrides it:
 
 ```sh
-FASTSAPP_GIPHY_KEY=your-key cargo build --release
+ZAPFAST_GIPHY_KEY=your-key cargo build --release
 ```
+
+The earlier `FASTSAPP_GIPHY_KEY` build variable remains supported as a fallback.
 
 `AGENTS.md` describes the architecture and the rules for changes.
 
 ## Disclaimer
 
-FastsApp is an unofficial client and is not affiliated with WhatsApp or
+ZapFast is an unofficial client and is not affiliated with WhatsApp or
 Meta. Using an unofficial client may be against WhatsApp's terms of service
 and could get an account suspended. Use it at your own risk.
 

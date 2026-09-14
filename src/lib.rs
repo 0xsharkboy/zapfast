@@ -1,4 +1,4 @@
-//! FastsApp internals exposed for diagnostics and tests.
+//! ZapFast internals exposed for diagnostics and tests.
 
 pub mod animation;
 pub mod app;

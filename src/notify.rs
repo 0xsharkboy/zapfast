@@ -97,10 +97,10 @@ fn deliver(
     }
     let mut notification = notify_rust::Notification::new();
     notification
-        .appname("FastsApp")
+        .appname("ZapFast")
         .summary(title)
         .body(body)
-        .icon("fastsapp")
+        .icon("zapfast")
         .action("default", "Open");
     if let Some(picture) = picture {
         notification.image_path(&picture.to_string_lossy());
@@ -152,7 +152,7 @@ fn deliver(
         return;
     }
     let mut notification = notify_rust::Notification::new();
-    notification.appname("FastsApp").summary(title).body(body);
+    notification.appname("ZapFast").summary(title).body(body);
     // Windows uses the image; macOS always uses the app icon.
     if let Some(picture) = picture {
         notification.image_path(&picture.to_string_lossy());
@@ -211,7 +211,7 @@ mod tests {
         let mut notifications = Notifications::default();
         notifications.show(
             "Ada Lovelace".into(),
-            "A test from FastsApp, with a picture".into(),
+            "A test from ZapFast, with a picture".into(),
             picture,
             "test".into(),
             Default::default(),

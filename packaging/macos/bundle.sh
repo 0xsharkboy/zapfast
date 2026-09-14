@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build FastsApp.app from a GUI binary on macOS.
+# Build ZapFast.app from a GUI binary on macOS.
 #
 #   packaging/macos/bundle.sh <binary> <output.app> <version>
 #
@@ -18,11 +18,11 @@ here="$(cd "$(dirname "$0")" && pwd)"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 
-cp "$binary" "$app/Contents/MacOS/fastsapp"
-chmod 755 "$app/Contents/MacOS/fastsapp"
+cp "$binary" "$app/Contents/MacOS/zapfast"
+chmod 755 "$app/Contents/MacOS/zapfast"
 sed "s/__VERSION__/$version/g" "$here/Info.plist" > "$app/Contents/Info.plist"
 
-iconset="$(mktemp -d)/fastsapp.iconset"
+iconset="$(mktemp -d)/zapfast.iconset"
 mkdir -p "$iconset"
 # iconutil reads these base sizes and optional @2x versions. It ignores 64x64.
 for size in 16 32 128 256 512; do
@@ -30,7 +30,7 @@ for size in 16 32 128 256 512; do
     double=$((size * 2))
     sips -z $double $double "$here/icon-1024.png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
-iconutil -c icns "$iconset" -o "$app/Contents/Resources/fastsapp.icns"
+iconutil -c icns "$iconset" -o "$app/Contents/Resources/zapfast.icns"
 
 # Sign with the configured identity or an ad-hoc signature.
 if [ -n "${CODESIGN_IDENTITY:-}" ]; then

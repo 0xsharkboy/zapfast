@@ -1,7 +1,7 @@
 ; Windows installer built from a release binary with Inno Setup 6.3 or newer:
 ;
-;   iscc /DVersion=0.1.0 /DArch=x86_64 /DBinary=...\fastsapp.exe ^
-;        /DOutputDir=dist packaging\windows\fastsapp.iss
+;   iscc /DVersion=0.1.0 /DArch=x86_64 /DBinary=...\zapfast.exe ^
+;        /DOutputDir=dist packaging\windows\zapfast.iss
 ;
 ; Arch matches the Rust target: x86_64 or aarch64. Installation uses the
 ; current user's Programs folder and does not need administrator rights.
@@ -25,8 +25,8 @@
   #define InnoArch "x64compatible"
 #endif
 
-#define AppName "FastsApp"
-#define AppExeName "fastsapp.exe"
+#define AppName "ZapFast"
+#define AppExeName "zapfast.exe"
 
 [Setup]
 ; Never change: this is how Windows tells an update from a new program.
@@ -35,9 +35,9 @@ AppName={#AppName}
 AppVersion={#Version}
 AppVerName={#AppName} {#Version}
 AppPublisher=Carmine Paolino
-AppPublisherURL=https://github.com/crmne/fastsapp
-AppSupportURL=https://github.com/crmne/fastsapp/issues
-AppUpdatesURL=https://github.com/crmne/fastsapp/releases
+AppPublisherURL=https://zapfast.rocks
+AppSupportURL=https://github.com/crmne/zapfast/issues
+AppUpdatesURL=https://github.com/crmne/zapfast/releases
 DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
@@ -47,8 +47,8 @@ ArchitecturesInstallIn64BitMode={#InnoArch}
 MinVersion=10.0
 LicenseFile=..\..\LICENSE
 OutputDir={#OutputDir}
-OutputBaseFilename=fastsapp-v{#Version}-{#Arch}-pc-windows-msvc-setup
-SetupIconFile=fastsapp.ico
+OutputBaseFilename=zapfast-v{#Version}-{#Arch}-pc-windows-msvc-setup
+SetupIconFile=zapfast.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -64,6 +64,13 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Source: "{#Binary}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+
+[InstallDelete]
+; AppId keeps upgrades in the existing installation directory. Remove the
+; previous executable and shortcuts so they cannot start the old client.
+Type: files; Name: "{app}\fastsapp.exe"
+Type: files; Name: "{autoprograms}\FastsApp.lnk"
+Type: files; Name: "{autodesktop}\FastsApp.lnk"
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"

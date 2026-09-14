@@ -1,6 +1,6 @@
-# FastsApp agent guide
+# ZapFast agent guide
 
-FastsApp is a small native WhatsApp client: Rust, egui, and the
+ZapFast is a small native WhatsApp client: Rust, egui, and the
 [whatsapp-rust](https://github.com/oxidezap/whatsapp-rust) library for the
 protocol. These notes are for coding agents and new contributors.
 
@@ -112,14 +112,16 @@ protocol. These notes are for coding agents and new contributors.
   player must use an explicit `Layout::left_to_right` at their own width.
   `src/ui/picker.rs` is the emoji/GIF/sticker panel. GIF search uses the
   key from Settings, else one baked in at build time from
-  `FASTSAPP_GIPHY_KEY` (`option_env!`); the repository carries none. The
+  `ZAPFAST_GIPHY_KEY` (`option_env!`); the repository carries none. The
   phone's recently used stickers arrive in `HistorySync.recent_stickers`
   when the device links and live in the archive's `stickers` table as raw
   `StickerMetadata`, fetched when the picker opens; favourite stickers sync
   through app state (`FavoriteSticker`), which whatsapp-rust does not
   surface, so they are not shown.
 - `src/paths.rs` moves a setup left by the app's earlier name
-  (`fastwhatsapp`) over once, so the linked device survives the rename.
+  (`fastsapp`, then `fastwhatsapp`) over once, so the linked device survives
+  the rename. Migration runs after the single-instance guard and outside demos;
+  keep the guard's `fastsapp:` wire identity compatible with running old copies.
 - The app outlives the window, as in fastpotify: `main` runs
   `eframe::run_native` in a loop; closing the window with "keep running"
   on sets `hide_intent`, the window is destroyed, and a headless loop keeps
@@ -180,17 +182,18 @@ A release is not finished when the tag is pushed. Do these in order:
    and `Fixed`, credit contributors and reporters where it helps, and end
    with a full-changelog link comparing the previous tag. Write about what
    changed for the user, not the commit history.
-4. After the release files exist, update both `fastsapp_version` in
+4. After the release files exist, update both `zapfast_version` in
    `docs/_config.yml` and the version menu in `docs/_data/versions.yml`.
    The menu lists only the current version, which points to `/download/`,
    and the Changelog link; do not add older versions to it. Never point the
-   download page at files that do not exist yet.
+   download page at files that do not exist yet. Set `release_asset_prefix` to
+   `zapfast` and `release_app_name` to `ZapFast` only once those assets exist.
 5. Update the AUR packages from the templates in `packaging/arch/`. The shared
    packaging workflow generates versions, hashes and `.SRCINFO` after the
    release exists, and publishes when `PUBLISH_AUR` and the required secrets
    are configured. Otherwise use `native-packages` to build, stage,
    review and publish the generated recipes; see `PACKAGING.md`. Validate
-   native builds with `makepkg -f`. A recipe-only `fastsapp-git` change does
+   native builds with `makepkg -f`. A recipe-only `zapfast-git` change does
    not require an application release.
 
 ## Definition of done

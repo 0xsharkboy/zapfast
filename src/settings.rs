@@ -86,8 +86,12 @@ impl Default for Settings {
     }
 }
 
-/// Optional build-time GIPHY key from `FASTSAPP_GIPHY_KEY`.
-pub const BUILT_IN_GIPHY_KEY: Option<&str> = option_env!("FASTSAPP_GIPHY_KEY");
+/// Optional build-time GIPHY key from `ZAPFAST_GIPHY_KEY`.
+/// The previous name remains accepted for existing build setups.
+pub const BUILT_IN_GIPHY_KEY: Option<&str> = match option_env!("ZAPFAST_GIPHY_KEY") {
+    Some(key) if !key.is_empty() => Some(key),
+    _ => option_env!("FASTSAPP_GIPHY_KEY"),
+};
 
 impl Settings {
     /// Returns the user key, built-in key, or `None`.
@@ -146,7 +150,7 @@ mod tests {
 
     #[test]
     fn round_trips_through_disk() {
-        let dir = std::env::temp_dir().join(format!("fastsapp-settings-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("zapfast-settings-{}", std::process::id()));
         let path = dir.join("settings.json");
         let settings = Settings {
             zoom: 1.25,

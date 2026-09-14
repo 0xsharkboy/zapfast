@@ -11,7 +11,7 @@ env:
   CARGO_TERM_COLOR: always
   # Baked into the binary by settings.rs; releases built without the
   # secret simply ship keyless and the picker asks for one.
-  FASTSAPP_GIPHY_KEY: ${{ secrets.FASTSAPP_GIPHY_KEY }}
+  ZAPFAST_GIPHY_KEY: ${{ secrets.ZAPFAST_GIPHY_KEY || secrets.FASTSAPP_GIPHY_KEY }}
 
 jobs:
   build:
@@ -55,17 +55,17 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          name="fastsapp-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          name="zapfast-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp "target/${{ matrix.target }}/release/fastsapp.exe" "dist/$name/"
+            cp "target/${{ matrix.target }}/release/zapfast.exe" "dist/$name/"
           else
-            cp "target/${{ matrix.target }}/release/fastsapp" "dist/$name/"
+            cp "target/${{ matrix.target }}/release/zapfast" "dist/$name/"
           fi
           cp README.md LICENSE "dist/$name/"
           if [ "${{ runner.os }}" = "Linux" ]; then
             # Desktop integration for package builds and hand-installs.
-            cp --parents packaging/applications/fastsapp.desktop packaging/icons/fastsapp.svg "dist/$name/"
+            cp --parents packaging/applications/zapfast.desktop packaging/icons/zapfast.svg "dist/$name/"
           fi
           cd dist
           if [ "${{ runner.os }}" = "Windows" ]; then
@@ -85,8 +85,8 @@ jobs:
           $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
           if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
           & $iscc "/DVersion=$version" "/DArch=$arch" `
-            "/DBinary=$PWD\target\${{ matrix.target }}\release\fastsapp.exe" `
-            "/DOutputDir=$PWD\dist" packaging\windows\fastsapp.iss
+            "/DBinary=$PWD\target\${{ matrix.target }}\release\zapfast.exe" `
+            "/DOutputDir=$PWD\dist" packaging\windows\zapfast.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - uses: actions/upload-artifact@v7
@@ -128,9 +128,9 @@ jobs:
         run: |
           mkdir -p universal
           lipo -create \
-            target/aarch64-apple-darwin/release/fastsapp \
-            target/x86_64-apple-darwin/release/fastsapp \
-            -output universal/fastsapp
+            target/aarch64-apple-darwin/release/zapfast \
+            target/x86_64-apple-darwin/release/zapfast \
+            -output universal/zapfast
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -142,7 +142,7 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           mkdir -p dist/macos-input
-          bash packaging/macos/bundle.sh universal/fastsapp dist/macos-input/FastsApp.app "$version"
+          bash packaging/macos/bundle.sh universal/zapfast dist/macos-input/ZapFast.app "$version"
           cp README.md LICENSE dist/macos-input/
 
       - name: Package, sign and notarize macOS app

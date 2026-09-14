@@ -2,13 +2,13 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use fastsapp::{app, backend, paths, settings, single_instance, util};
+use zapfast::{app, backend, paths, settings, single_instance, util};
 
 use clap::Parser;
 
 /// A fast, native WhatsApp client.
 #[derive(Debug, Parser)]
-#[command(name = "fastsapp", version, about)]
+#[command(name = "zapfast", version, about)]
 struct Cli {
     /// Log more from the WhatsApp library.
     #[arg(short, long)]
@@ -42,22 +42,49 @@ struct Cli {
 
 fn main() -> eframe::Result<()> {
     let cli = Cli::parse();
-    let default_filter = if cli.verbose {
-        "info,fastsapp=debug,whatsapp_rust=debug,wacore=debug"
+    let waker = backend::Waker::default();
+    #[cfg(feature = "demo")]
+    let demo = cli.demo || cli.demo_shot.is_some();
+    #[cfg(not(feature = "demo"))]
+    let demo = false;
+    // Keep one linked instance. Demo runs do not participate.
+    let instance = if demo {
+        None
     } else {
-        "warn,fastsapp=info"
+        match single_instance::acquire(&waker) {
+            single_instance::Outcome::Only(guard) => Some(guard),
+            single_instance::Outcome::Surfaced => {
+                eprintln!("ZapFast or FastsApp is already running; asked it to show its window");
+                return Ok(());
+            }
+        }
     };
-    let dirs = paths::AppDirs::discover();
+    let default_filter = if cli.verbose {
+        "info,zapfast=debug,whatsapp_rust=debug,wacore=debug"
+    } else {
+        "warn,zapfast=info"
+    };
+    // A demo must not create empty ZapFast directories that would prevent a
+    // later real launch from adopting the existing FastsApp session.
+    let dirs = if demo {
+        paths::AppDirs::under(&std::env::temp_dir().join(format!(
+            "zapfast-demo-{}-{}",
+            std::process::id(),
+            jiff::Timestamp::now().as_millisecond(),
+        )))
+    } else {
+        paths::AppDirs::discover()
+    };
+    if !demo {
+        dirs.adopt_previous_names()
+            .map_err(|error| eframe::Error::AppCreation(error.into()))?;
+    }
     let dirs_ready = dirs.ensure();
     let mut logger =
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_filter));
     // Write desktop-session logs to disk. Demo runs use stderr so they do not
     // replace a live session's log.
-    #[cfg(feature = "demo")]
-    let demo_run = cli.demo || cli.demo_shot.is_some();
-    #[cfg(not(feature = "demo"))]
-    let demo_run = false;
-    if !demo_run {
+    if !demo {
         match std::fs::File::create(dirs.log_file()) {
             Ok(file) => {
                 logger.target(env_logger::Target::Pipe(Box::new(Tee(file))));
@@ -71,24 +98,8 @@ fn main() -> eframe::Result<()> {
     }
     log_panics(dirs.panic_log());
     let settings = settings::Settings::load(&dirs.settings_file());
+    let demo_persistence = demo.then(|| dirs.state.join("window.ron"));
 
-    let waker = backend::Waker::default();
-    #[cfg(feature = "demo")]
-    let demo = cli.demo || cli.demo_shot.is_some();
-    #[cfg(not(feature = "demo"))]
-    let demo = false;
-    // Keep one linked instance. Demo runs do not participate.
-    let instance = if demo {
-        None
-    } else {
-        match single_instance::acquire(&waker) {
-            single_instance::Outcome::Only(guard) => Some(guard),
-            single_instance::Outcome::Surfaced => {
-                log::info!("FastsApp is already running; asked it to show its window");
-                return Ok(());
-            }
-        }
-    };
     #[allow(unused_mut)]
     let mut app = if demo {
         app::App::headless(dirs, settings).0
@@ -100,8 +111,8 @@ fn main() -> eframe::Result<()> {
     }
     #[cfg(feature = "demo")]
     if demo {
-        fastsapp::demo::populate(&mut app);
-        fastsapp::demo::apply_flags(&mut app, cli.demo_page.as_deref());
+        zapfast::demo::populate(&mut app);
+        zapfast::demo::apply_flags(&mut app, cli.demo_page.as_deref());
     }
     #[cfg(feature = "demo")]
     let shot = cli.demo_shot.clone().map(|path| Shot {
@@ -119,8 +130,8 @@ fn main() -> eframe::Result<()> {
         #[cfg(feature = "demo")]
         let creator_shot = shot.clone();
         eframe::run_native(
-            "FastsApp",
-            native_options(),
+            "ZapFast",
+            native_options(demo_persistence.clone()),
             Box::new(move |cc| {
                 creator_waker.attach(&cc.egui_ctx);
                 let mut app = creator_slot
@@ -164,7 +175,7 @@ fn main() -> eframe::Result<()> {
                     break;
                 }
             }
-            fastsapp::tray::idle(std::time::Duration::from_millis(150));
+            zapfast::tray::idle(std::time::Duration::from_millis(150));
         }
         let quit = slot
             .lock()
@@ -207,7 +218,7 @@ fn log_panics(path: std::path::PathBuf) {
         previous(info);
         let thread = std::thread::current();
         let entry = format!(
-            "{} fastsapp {} on thread {:?}: {info}\n",
+            "{} zapfast {} on thread {:?}: {info}\n",
             jiff::Timestamp::now(),
             env!("CARGO_PKG_VERSION"),
             thread.name().unwrap_or("unnamed"),
@@ -232,11 +243,11 @@ fn demo_size_arg() -> Option<[f32; 2]> {
     Some([w.parse::<f32>().ok()?, h.parse::<f32>().ok()?])
 }
 
-fn native_options() -> eframe::NativeOptions {
+fn native_options(demo_persistence: Option<std::path::PathBuf>) -> eframe::NativeOptions {
     let demo_size = demo_size_arg().unwrap_or([1180.0, 780.0]);
     let viewport = egui::ViewportBuilder::default()
-        .with_title("FastsApp")
-        .with_app_id("fastsapp")
+        .with_title("ZapFast")
+        .with_app_id("zapfast")
         .with_inner_size(demo_size)
         .with_min_inner_size([720.0, 480.0])
         .with_icon(app_icon())
@@ -246,6 +257,7 @@ fn native_options() -> eframe::NativeOptions {
         .with_title_shown(false);
     eframe::NativeOptions {
         viewport,
+        persistence_path: demo_persistence,
         // Do not restore window size during fixed-size screenshot runs.
         persist_window: std::env::args().all(|arg| arg != "--demo" && arg != "--demo-shot"),
         // Disable vsync because hidden Wayland windows may stop receiving frame

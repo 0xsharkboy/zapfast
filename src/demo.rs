@@ -223,7 +223,7 @@ fn message(chat: &str, id: &str, from_me: bool, timestamp: i64, content: Content
 
 /// Writes sample attachments and generated profile pictures to disk.
 fn plant_avatars(app: &mut App) {
-    let dir = crate::paths::AppDirs::discover().avatar_cache_dir();
+    let dir = app.dirs.avatar_cache_dir();
     if std::fs::create_dir_all(&dir).is_err() {
         return;
     }
@@ -795,7 +795,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
             "update" => {
                 app.update = Some(crate::updates::Release {
                     version: "99.0.0".to_owned(),
-                    url: "https://github.com/crmne/fastsapp/releases/latest".to_owned(),
+                    url: "https://github.com/crmne/zapfast/releases/latest".to_owned(),
                 });
             }
             "shortcuts" => app.dialog = Some(Dialog::Shortcuts),
@@ -915,9 +915,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                         (t * 220.0 * std::f32::consts::TAU).sin() * 0.4 * (t * 1.3).sin().abs()
                     })
                     .collect();
-                let path = crate::paths::AppDirs::discover()
-                    .media_cache_dir()
-                    .join("demo-voice.ogg");
+                let path = app.dirs.media_cache_dir().join("demo-voice.ogg");
                 if let Ok(bytes) = crate::voice::encode(&tone) {
                     let _ = std::fs::create_dir_all(path.parent().expect("a directory"));
                     let _ = std::fs::write(&path, bytes);
@@ -1050,7 +1048,7 @@ mod tests {
 
     fn app() -> App {
         let root = std::env::temp_dir().join(format!(
-            "fastsapp-demo-{}-{:?}",
+            "zapfast-demo-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
@@ -1098,6 +1096,16 @@ mod tests {
                 .any(|m| matches!(m.content, Content::Revoked))
         );
         assert!(ada.messages.iter().any(|m| m.quoted.is_some()));
+    }
+
+    #[test]
+    fn demo_assets_stay_in_the_demo_directories() {
+        let mut app = app();
+        let avatar = app.avatar(sample_ids()[0]).expect("sample avatar");
+        assert!(avatar.starts_with(app.dirs.avatar_cache_dir()));
+        assert!(avatar.is_file());
+        apply_flags(&mut app, Some("voice"));
+        assert!(app.dirs.media_cache_dir().join("demo-voice.ogg").is_file());
     }
 
     #[test]

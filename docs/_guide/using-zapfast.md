@@ -1,6 +1,8 @@
 ---
-title: Using FastsApp
+title: Using ZapFast
 description: Send messages and use attachments, voice messages, and keyboard shortcuts.
+redirect_from:
+  - /using-fastsapp/
 nav_order: 3
 ---
 
@@ -32,7 +34,7 @@ Paste a picture, drop files on the window, or select them with the paperclip.
 They stay above the composer until you send them, with the typed text as a
 caption. Press Escape or click a file's close button to remove it. Incoming
 attachments up to 64 MB download when they enter view, or on click if automatic
-downloads are off. If an attachment has expired, FastsApp asks your phone to
+downloads are off. If an attachment has expired, ZapFast asks your phone to
 upload it again.
 
 ## Voice messages
@@ -40,7 +42,7 @@ upload it again.
 Voice messages play in the chat with a seekable waveform. The first play sends
 a played receipt. When the composer is empty, the send button becomes a
 microphone. Press Enter or the send button to send the recording, or Escape or
-the delete button to discard it. FastsApp raises the volume of quiet recordings.
+the delete button to discard it. ZapFast raises the volume of quiet recordings.
 Starting a reply before recording includes the quoted message.
 
 ## Copying
@@ -66,7 +68,7 @@ see its picture, number, and group members.
 
 ## Notifications and the tray
 
-Closing the window keeps FastsApp linked in the tray. Click the tray icon or
+Closing the window keeps ZapFast linked in the tray. Click the tray icon or
 launch the app again to reopen it. Notifications show the chat picture and open
 the chat when clicked. Muted chats do not send notifications. You can change
 both settings.

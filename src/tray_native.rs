@@ -45,13 +45,13 @@ fn build(sender: Sender<TrayCommand>, wake: Wake) -> Result<Item, Box<dyn std::e
     let icon = Icon::from_rgba(crate::util::tray_template_rgba(size as usize), size, size)?;
     let menu = Menu::new();
     menu.append_items(&[
-        &MenuItem::with_id(SHOW, "Show or hide FastsApp", true, None),
+        &MenuItem::with_id(SHOW, "Show or hide ZapFast", true, None),
         &PredefinedMenuItem::separator(),
         &MenuItem::with_id(QUIT, "Quit", true, None),
     ])?;
     let builder = TrayIconBuilder::new()
         .with_icon(icon)
-        .with_tooltip("FastsApp")
+        .with_tooltip("ZapFast")
         .with_menu(Box::new(menu));
     // Left-click toggles the window; right-click opens the menu.
     #[cfg(target_os = "macos")]
@@ -96,7 +96,7 @@ mod host {
     pub fn start(sender: Sender<TrayCommand>, wake: Wake) -> Result<u32, String> {
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let spawned = std::thread::Builder::new()
-            .name("fastsapp-tray".to_owned())
+            .name("zapfast-tray".to_owned())
             .spawn(move || {
                 let _item = match build(sender, wake) {
                     Ok(item) => item,

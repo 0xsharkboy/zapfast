@@ -1,20 +1,21 @@
 [package]
-name = "fastsapp"
-version = "0.12.1"
+name = "zapfast"
+version = "0.13.0"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT"
 description = "A native WhatsApp client built with Rust and egui"
-repository = "https://github.com/crmne/fastsapp"
+homepage = "https://zapfast.rocks"
+repository = "https://github.com/crmne/zapfast"
 keywords = ["whatsapp", "chat", "egui", "messaging"]
 categories = ["gui"]
 
 [lib]
-name = "fastsapp"
+name = "zapfast"
 path = "src/lib.rs"
 
 [[bin]]
-name = "fastsapp"
+name = "zapfast"
 path = "src/main.rs"
 
 [dependencies]

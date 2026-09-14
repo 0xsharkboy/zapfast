@@ -1,9 +1,9 @@
-//! Where FastsApp keeps its files.
+//! Where ZapFast keeps its files.
 //!
 //! Configuration, session state, and caches use separate standard platform
 //! directories. Clearing a cache does not remove device keys.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
 
@@ -16,19 +16,17 @@ pub struct AppDirs {
 
 impl AppDirs {
     pub fn discover() -> Self {
-        let dirs = match Self::of("fastsapp") {
+        match Self::of("zapfast") {
             Some(dirs) => dirs,
             None => {
                 let fallback = std::env::current_dir().unwrap_or_default();
                 Self {
-                    config: fallback.join("fastsapp-config"),
-                    state: fallback.join("fastsapp-state"),
-                    cache: fallback.join("fastsapp-cache"),
+                    config: fallback.join("zapfast-config"),
+                    state: fallback.join("zapfast-state"),
+                    cache: fallback.join("zapfast-cache"),
                 }
             }
-        };
-        dirs.adopt_previous_name();
-        dirs
+        }
     }
 
     /// Standard platform directories for the app.
@@ -44,27 +42,31 @@ impl AppDirs {
         })
     }
 
-    /// Moves data from the old `fastwhatsapp` paths once, preserving the link.
-    fn adopt_previous_name(&self) {
-        let Some(old) = Self::of("fastwhatsapp") else {
-            return;
-        };
+    /// Adopts earlier names, newest first, without replacing existing data.
+    /// Call only after acquiring the instance guard, and never for demo runs.
+    pub fn adopt_previous_names(&self) -> std::io::Result<()> {
+        for name in ["fastsapp", "fastwhatsapp"] {
+            if let Some(old) = Self::of(name) {
+                self.adopt(&old)?;
+            }
+            if let (Some(from), Some(to)) =
+                (eframe::storage_dir(name), eframe::storage_dir("zapfast"))
+            {
+                adopt_directory(&from, &to)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn adopt(&self, old: &Self) -> std::io::Result<()> {
         for (from, to) in [
             (&old.config, &self.config),
             (&old.state, &self.state),
             (&old.cache, &self.cache),
         ] {
-            if from.is_dir() && !to.exists() {
-                match std::fs::rename(from, to) {
-                    Ok(()) => eprintln!("moved {} to {}", from.display(), to.display()),
-                    Err(error) => eprintln!(
-                        "could not move {} to {}: {error}",
-                        from.display(),
-                        to.display()
-                    ),
-                }
-            }
+            adopt_directory(from, to)?;
         }
+        Ok(())
     }
 
     /// Places all data under one directory for tests and temporary runs.
@@ -93,7 +95,7 @@ impl AppDirs {
 
     /// Current-run log, replaced at startup.
     pub fn log_file(&self) -> PathBuf {
-        self.state.join("fastsapp.log")
+        self.state.join("zapfast.log")
     }
 
     /// Panic log written before process exit.
@@ -136,5 +138,133 @@ impl AppDirs {
             std::fs::create_dir_all(dir)?;
         }
         Ok(())
+    }
+}
+
+/// Rename whole directories so SQLite databases travel with their WAL files.
+/// A failed move stops startup before empty replacement directories are made.
+fn adopt_directory(from: &Path, to: &Path) -> std::io::Result<()> {
+    if from.is_dir() && !to.try_exists()? {
+        if let Some(parent) = to.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::rename(from, to)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn root(name: &str) -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("zapfast-paths-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn rename_preserves_session_archive_settings_and_cached_files() {
+        for name in ["fastsapp", "fastwhatsapp"] {
+            let root = root(name);
+            let old = AppDirs::under(&root.join(name));
+            let new = AppDirs::under(&root.join("zapfast"));
+            old.ensure().unwrap();
+            for path in [
+                old.settings_file(),
+                old.session_db(),
+                old.state.join("session.db-wal"),
+                old.archive_db(),
+                old.state.join("archive.db-wal"),
+                old.saved_sticker_dir().join("pack/sticker.webp"),
+                old.media_cache_dir().join("photo.jpg"),
+            ] {
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, b"preserved").unwrap();
+            }
+            new.adopt(&old).unwrap();
+            new.adopt(&old).unwrap(); // A second launch is a no-op.
+            for path in [
+                new.settings_file(),
+                new.session_db(),
+                new.state.join("session.db-wal"),
+                new.archive_db(),
+                new.state.join("archive.db-wal"),
+                new.saved_sticker_dir().join("pack/sticker.webp"),
+                new.media_cache_dir().join("photo.jpg"),
+            ] {
+                assert_eq!(std::fs::read(path).unwrap(), b"preserved");
+            }
+            assert!(!old.config.exists());
+            assert!(!old.state.exists());
+            assert!(!old.cache.exists());
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn newest_data_wins_without_merging_archives() {
+        let root = root("precedence");
+        let new = AppDirs::under(&root.join("zapfast"));
+        let recent = AppDirs::under(&root.join("fastsapp"));
+        let oldest = AppDirs::under(&root.join("fastwhatsapp"));
+        recent.ensure().unwrap();
+        oldest.ensure().unwrap();
+        std::fs::create_dir_all(&new.config).unwrap();
+        std::fs::write(new.settings_file(), b"new settings").unwrap();
+        std::fs::write(recent.settings_file(), b"old settings").unwrap();
+        std::fs::write(recent.archive_db(), b"recent archive").unwrap();
+        std::fs::write(oldest.archive_db(), b"oldest archive").unwrap();
+        new.adopt(&recent).unwrap();
+        new.adopt(&oldest).unwrap();
+        assert_eq!(std::fs::read(new.settings_file()).unwrap(), b"new settings");
+        assert_eq!(
+            std::fs::read(recent.settings_file()).unwrap(),
+            b"old settings"
+        );
+        assert_eq!(std::fs::read(new.archive_db()).unwrap(), b"recent archive");
+        assert_eq!(
+            std::fs::read(oldest.archive_db()).unwrap(),
+            b"oldest archive"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn shared_config_and_state_directory_moves_once() {
+        let root = root("shared");
+        let old = AppDirs {
+            config: root.join("old/data"),
+            state: root.join("old/data"),
+            cache: root.join("old/cache"),
+        };
+        let new = AppDirs {
+            config: root.join("new/data"),
+            state: root.join("new/data"),
+            cache: root.join("new/cache"),
+        };
+        old.ensure().unwrap();
+        std::fs::write(old.session_db(), b"session").unwrap();
+        new.adopt(&old).unwrap();
+        assert_eq!(std::fs::read(new.session_db()).unwrap(), b"session");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_migration_leaves_source_available_for_retry() {
+        let root = root("failure");
+        let old = AppDirs::under(&root.join("old"));
+        let new = AppDirs::under(&root.join("blocked/new"));
+        old.ensure().unwrap();
+        std::fs::write(old.session_db(), b"session").unwrap();
+        std::fs::write(root.join("blocked"), b"not a directory").unwrap();
+        assert!(new.adopt(&old).is_err());
+        assert_eq!(std::fs::read(old.session_db()).unwrap(), b"session");
+        std::fs::remove_file(root.join("blocked")).unwrap();
+        new.adopt(&old).unwrap();
+        assert_eq!(std::fs::read(new.session_db()).unwrap(), b"session");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

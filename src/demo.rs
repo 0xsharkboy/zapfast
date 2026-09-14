@@ -575,10 +575,10 @@ pub fn populate(app: &mut App) {
                 true,
                 base + 150,
                 Content::Text {
-                    text: "btw I made my own Spotify app from scratch! https://fastpotify.rocks/".into(),
+                    text: "btw I made my own Spotify app from scratch! https://spotifast.rocks/".into(),
                     preview: Some(LinkPreview {
-                        url: "https://fastpotify.rocks/".into(),
-                        title: Some("fastpotify.rocks".into()),
+                        url: "https://spotifast.rocks/".into(),
+                        title: Some("spotifast.rocks".into()),
                         description: Some("Spotify, native and fast. A lightweight Spotify client written in Rust with egui.".into()),
                     }),
                 },

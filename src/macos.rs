@@ -4,7 +4,7 @@
 use std::cell::RefCell;
 use std::sync::Mutex;
 
-use objc2_app_kit::{NSView, NSWindowButton};
+use objc2_app_kit::{NSApplication, NSView, NSWindowButton};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem as Native, Submenu};
 
@@ -96,6 +96,9 @@ pub fn attach(ctx: &egui::Context) {
     }
     *REPAINT.lock().unwrap_or_else(|p| p.into_inner()) = Some(ctx.clone());
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
+        if native_edit(&event.id.0) {
+            return;
+        }
         EVENTS
             .lock()
             .unwrap_or_else(|p| p.into_inner())
@@ -115,6 +118,41 @@ pub fn attach(ctx: &egui::Context) {
             menu.init_for_nsapp();
         }
     });
+    // Demo windows have no tray to activate the app. This also brings a newly
+    // recreated window forward after a menu command while running headless.
+    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+}
+
+/// A native file dialog runs a modal loop, so its text fields must receive
+/// editing commands immediately instead of leaving them queued for egui.
+fn native_edit(id: &str) -> bool {
+    use objc2::sel;
+    let selector = match id {
+        "copy" => sel!(copy:),
+        "cut" => sel!(cut:),
+        "paste" => sel!(paste:),
+        "undo" => sel!(undo:),
+        "redo" => sel!(redo:),
+        "select-all" => sel!(selectAll:),
+        _ => return false,
+    };
+    let Some(main) = objc2::MainThreadMarker::new() else {
+        return false;
+    };
+    let app = NSApplication::sharedApplication(main);
+    let Some(responder) = app.keyWindow().and_then(|window| window.firstResponder()) else {
+        return false;
+    };
+    // The pinned winit version installs WinitView as its first responder.
+    if responder.class().name().to_bytes() == b"WinitView" {
+        return false;
+    }
+    // SAFETY: standard AppKit editing selectors; nil target walks the native
+    // responder chain, and these actions accept a nil sender.
+    unsafe {
+        app.sendAction_to_from(selector, None, None);
+    }
+    true
 }
 
 fn edit_event(id: &str) -> Option<egui::Event> {

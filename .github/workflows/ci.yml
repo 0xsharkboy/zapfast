@@ -70,9 +70,9 @@ jobs:
         timeout-minutes: 3
         run: |
           cargo build --locked --features demo
-          target/debug/zapfast --demo --demo-shot "$RUNNER_TEMP/zapfast-content.png" --demo-shot-delay 5000 &
+          target/debug/zapfast --demo --demo-shot "$RUNNER_TEMP/zapfast-content.png" --demo-shot-delay 8000 &
           demo_pid=$!
-          sleep 3
+          sleep 6
           screencapture -x "$RUNNER_TEMP/zapfast-window.png" || true
           wait "$demo_pid"
           test -s "$RUNNER_TEMP/zapfast-content.png"

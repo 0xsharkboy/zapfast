@@ -293,7 +293,7 @@ pub enum Command {
         row: Box<Message>,
         raw: Vec<u8>,
     },
-    /// Internal group metadata result.
+    /// Internal send audience. The sender waits for it to be archived.
     GroupRecipients {
         chat: ChatId,
         id: String,

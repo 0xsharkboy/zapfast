@@ -14,6 +14,11 @@ impl Archive {
         recipients: &[String],
     ) -> Result<()> {
         let transaction = self.connection.unchecked_transaction()?;
+        transaction.query_row(
+            "SELECT 1 FROM messages WHERE chat = ?1 AND id = ?2 AND from_me = 1",
+            params![chat, id],
+            |row| row.get::<_, i64>(0),
+        )?;
         for recipient in recipients {
             transaction.execute(
                 "INSERT INTO group_receipts (chat, id, recipient, expected) VALUES (?1, ?2, ?3, 1)
@@ -170,10 +175,27 @@ mod tests {
     #[test]
     fn unknown_group_audience_cannot_prove_everyone_has_read() {
         let archive = Archive::in_memory().unwrap();
+        let group = "123-456@g.us";
+        archive.ensure_chat(group, "Group").unwrap();
+        archive
+            .insert_message(
+                &super::super::tests::message(group, "unknown", 50, true),
+                None,
+            )
+            .unwrap();
         assert!(
             !archive
                 .group_receipt("123-456@g.us", "unknown", "a@lid", Delivery::Read, 100)
                 .unwrap()
+        );
+        archive.clear().unwrap();
+        assert_eq!(
+            archive
+                .connection
+                .query_row("SELECT COUNT(*) FROM group_receipts", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
         );
     }
 }

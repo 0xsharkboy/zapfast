@@ -68,6 +68,9 @@ protocol. These notes are for coding agents and new contributors.
   runs after the selection plugin's own end-of-pass flush (plugins run
   in registration order and the built-ins come first, so end-pass
   callbacks fire too early).
+  Selection galleys share the message viewport's horizontal bounds while
+  retaining their glyph positions: otherwise egui considers short incoming
+  and outgoing messages separate columns and will not sweep across them.
 - Group names and members come from `groups().get_metadata`, asked one
   turn at a time (two per 5 s tick, `pump_group_info`): dozens of unnamed
   groups arrive with history sync and a burst of queries hits the

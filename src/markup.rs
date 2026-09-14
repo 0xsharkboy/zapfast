@@ -154,11 +154,25 @@ pub fn paint_selectable(
     fallback: Color32,
     visible: bool,
 ) {
+    // egui treats non-overlapping text bounds as separate columns. Incoming
+    // and outgoing bubbles are one transcript even when both contain short
+    // text. Give selection a shared column while keeping every glyph in its
+    // original screen position; layout, hit targets, and link offsets stay put.
+    let mut galley = (*text.galley).clone();
+    let column = ui.clip_rect().x_range();
+    let offset = pos.x - column.min;
+    for row in &mut galley.rows {
+        row.pos.x += offset;
+    }
+    galley.rect.min.x = 0.0;
+    galley.rect.max.x = column.span();
+    galley.mesh_bounds = galley.mesh_bounds.translate(egui::vec2(offset, 0.0));
+    let selection_pos = Pos2::new(column.min, pos.y);
     egui::text_selection::LabelSelectionState::label_text_selection(
         ui,
         response,
-        pos,
-        text.galley.clone(),
+        selection_pos,
+        Arc::new(galley),
         fallback,
         egui::Stroke::NONE,
     );
@@ -689,8 +703,8 @@ mod tests {
         };
         assert_eq!(links("see https://a.b/c?d=1."), vec!["https://a.b/c?d=1"]);
         assert_eq!(
-            links("go to fastpotify.rocks!"),
-            vec!["https://fastpotify.rocks"]
+            links("go to spotifast.rocks!"),
+            vec!["https://spotifast.rocks"]
         );
         assert_eq!(
             links("mail hello@section8berlin.com or dm"),

@@ -575,10 +575,10 @@ pub fn populate(app: &mut App) {
                 true,
                 base + 150,
                 Content::Text {
-                    text: "btw I made my own Spotify app from scratch! https://fastpotify.rocks/".into(),
+                    text: "btw I made my own Spotify app from scratch! https://spotifast.rocks/".into(),
                     preview: Some(LinkPreview {
-                        url: "https://fastpotify.rocks/".into(),
-                        title: Some("fastpotify.rocks".into()),
+                        url: "https://spotifast.rocks/".into(),
+                        title: Some("spotifast.rocks".into()),
                         description: Some("Spotify, native and fast. A lightweight Spotify client written in Rust with egui.".into()),
                     }),
                 },
@@ -1688,6 +1688,77 @@ mod tests {
         }
         let copied = copied.expect("the sweep put text on the clipboard");
         assert!(!copied.trim().is_empty(), "{copied:?}");
+    }
+
+    #[test]
+    fn a_drag_selects_short_messages_on_opposite_sides_of_the_chat() {
+        let mut app = app();
+        let chat = sample_ids()[0].to_owned();
+        app.conversations.get_mut(&chat).unwrap().messages = vec![
+            message(&chat, "left", false, 100, Content::text("Left first")),
+            message(&chat, "right", true, 200, Content::text("Right second")),
+            message(&chat, "last", false, 300, Content::text("Left last")),
+        ];
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        render(&mut app, &ctx);
+        render(&mut app, &ctx);
+        let body = |id| {
+            ctx.data(|data| {
+                data.get_temp::<egui::Rect>(
+                    crate::ui::conversation::bubble_id(&chat, id).with("body"),
+                )
+            })
+            .unwrap()
+        };
+        let left = body("left");
+        let right = body("right");
+        assert!(
+            left.right() < right.left(),
+            "the bubbles must not overlap horizontally"
+        );
+        let from = egui::pos2(left.left() + 1.0, left.center().y);
+        let below = egui::pos2(750.0, 1100.0);
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let mut copied = String::new();
+        for events in [
+            vec![egui::Event::PointerMoved(from), press(from, true)],
+            vec![egui::Event::PointerMoved(below), egui::Event::PointerGone],
+            vec![egui::Event::PointerMoved(below)],
+            vec![press(below, false)],
+            vec![egui::Event::Copy],
+            vec![],
+        ] {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1180.0, 780.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    app.background_frame(&ui.ctx().clone());
+                    app.frame_ui(ui);
+                },
+            );
+            output.textures_delta.clear();
+            for command in output.platform_output.commands {
+                if let egui::OutputCommand::CopyText(text) = command {
+                    copied = text;
+                }
+            }
+        }
+        assert_eq!(copied.matches("] ").count(), 3, "{copied:?}");
+        for text in ["Left first", "Right second", "Left last"] {
+            assert!(copied.contains(text), "{copied:?}");
+        }
     }
 
     /// Selection continues and scrolls after the pointer leaves the window.

@@ -4870,9 +4870,9 @@ mod tests {
         let message = wa::Message {
             extended_text_message: whatsapp_rust::prelude::MessageField::some(
                 wa::message::ExtendedTextMessage {
-                    text: Some("see fastpotify.rocks @123456@lid".into()),
-                    matched_text: Some("https://fastpotify.rocks/".into()),
-                    title: Some("fastpotify.rocks".into()),
+                    text: Some("see spotifast.rocks @123456@lid".into()),
+                    matched_text: Some("https://spotifast.rocks/".into()),
+                    title: Some("spotifast.rocks".into()),
                     description: Some("Spotify, native and fast".into()),
                     context_info: whatsapp_rust::prelude::MessageField::some(wa::ContextInfo {
                         mentioned_jid: vec!["123456@lid".into()],
@@ -4886,8 +4886,8 @@ mod tests {
         match classify(&message) {
             Some(Content::Text { preview, .. }) => {
                 let preview = preview.expect("preview");
-                assert_eq!(preview.url, "https://fastpotify.rocks/");
-                assert_eq!(preview.title.as_deref(), Some("fastpotify.rocks"));
+                assert_eq!(preview.url, "https://spotifast.rocks/");
+                assert_eq!(preview.title.as_deref(), Some("spotifast.rocks"));
             }
             other => panic!("unexpected {other:?}"),
         }

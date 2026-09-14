@@ -5,13 +5,13 @@ it pins the shared CLI and nFPM versions and declares Linux amd64/arm64 inputs,
 DEB/RPM contents, dependencies, recipe templates and downstream repositories.
 Application assets and native recipes stay in `packaging/`.
 
-The next release uses the ZapFast name and `zapfast` binary. Its AUR recipes
+Version 0.13.0 introduces the ZapFast name and `zapfast` binary. Its AUR recipes
 provide and replace the corresponding FastsApp packages. The GitHub repository is
-`crmne/zapfast`, so source archives extract into `zapfast-VERSION`. These
-renamed templates target the next release; use the configuration from the matching tag to rebuild an older FastsApp release.
-After publishing the first ZapFast release and AUR packages, update the README's
-installation instructions and the site's `release_asset_prefix` and
-`release_app_name` alongside its version. Existing release files keep their names.
+`crmne/zapfast`, so source archives extract into `zapfast-VERSION`. Use the
+configuration from the matching tag to rebuild an older FastsApp release.
+After publishing the first ZapFast release and AUR packages, update the site's
+`release_asset_prefix` and `release_app_name` alongside its version. Existing
+release files keep their names.
 
 ```sh
 gem install native-packages --version 0.5.1

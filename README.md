@@ -97,13 +97,13 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
 
 ## Installing
 
-ZapFast was previously called FastsApp. Published releases and AUR packages
-still use the old name; builds from this branch use ZapFast. On Arch Linux:
+ZapFast was previously called FastsApp. Version 0.13.0 introduces the new
+package and executable names. On Arch Linux:
 
 ```sh
-yay -S fastsapp-bin      # the released build, ready made
-yay -S fastsapp          # the release, built from source
-yay -S fastsapp-git      # built from the latest commit
+yay -S zapfast-bin      # the released build, ready made
+yay -S zapfast          # the release, built from source
+yay -S zapfast-git      # built from the latest commit
 ```
 
 Builds for every release are on the
@@ -111,12 +111,17 @@ Builds for every release are on the
 
 | Platform | File |
 | --- | --- |
-| Linux x86_64 and arm64 | `fastsapp-vX.Y.Z-<target>.tar.gz`, with the desktop file and icon in `packaging/` |
-| Windows x64 and arm64 | `fastsapp-vX.Y.Z-<target>-setup.exe` (no administrator rights needed), or the `.zip` |
-| macOS, universal | `fastsapp-vX.Y.Z-macos-universal.dmg` |
+| Linux x86_64 and arm64 | `zapfast-vX.Y.Z-<target>.tar.gz`, with the desktop file and icon in `packaging/` |
+| Windows x64 and arm64 | `zapfast-vX.Y.Z-<target>-setup.exe` (no administrator rights needed), or the `.zip` |
+| macOS, universal | `zapfast-vX.Y.Z-macos-universal.dmg` |
 
-Unsigned macOS releases are not notarized. If macOS blocks the app, allow it
-under **System Settings**, **Privacy & Security**.
+The macOS release process signs the app with Developer ID, submits the DMG
+to Apple's notarization service, and staples and validates its ticket before
+publishing. Open the DMG and drag **ZapFast** to Applications.
+When upgrading from FastsApp on macOS, quit the old app and remove its
+application bundle after installing ZapFast.
+
+Releases before 0.13.0 keep their original FastsApp filenames.
 
 ### From source
 

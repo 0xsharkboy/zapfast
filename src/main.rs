@@ -19,6 +19,21 @@ struct Cli {
     #[arg(long)]
     demo: bool,
 
+    /// Prepare an offline, scripted tour. Press Space to play or replay it.
+    #[cfg(feature = "demo")]
+    #[arg(long, conflicts_with = "demo_page")]
+    demo_tour: bool,
+
+    /// Start the tour automatically after this many milliseconds.
+    #[cfg(feature = "demo")]
+    #[arg(long, requires = "demo_tour", value_name = "MS")]
+    demo_tour_delay: Option<u64>,
+
+    /// Save pointer and shortcut timing for video captions (demo tour only).
+    #[cfg(feature = "demo")]
+    #[arg(long, requires = "demo_tour", value_name = "PATH")]
+    demo_tour_events: Option<std::path::PathBuf>,
+
     /// Preview macOS content layout on another platform (demo only).
     #[cfg(feature = "demo")]
     #[arg(long, requires = "demo")]
@@ -49,7 +64,7 @@ fn main() -> eframe::Result<()> {
     let cli = Cli::parse();
     let waker = backend::Waker::default();
     #[cfg(feature = "demo")]
-    let demo = cli.demo || cli.demo_shot.is_some();
+    let demo = cli.demo || cli.demo_shot.is_some() || cli.demo_tour;
     #[cfg(not(feature = "demo"))]
     let demo = false;
     // Keep one linked instance. Demo runs do not participate.
@@ -118,6 +133,9 @@ fn main() -> eframe::Result<()> {
     if demo {
         zapfast::demo::populate(&mut app);
         zapfast::demo::apply_flags(&mut app, cli.demo_page.as_deref());
+        if cli.demo_tour {
+            zapfast::demo::tour::prepare(&mut app);
+        }
     }
     #[cfg(feature = "demo")]
     let shot = cli.demo_shot.clone().map(|path| Shot {
@@ -134,6 +152,8 @@ fn main() -> eframe::Result<()> {
         let creator_waker = waker.clone();
         #[cfg(feature = "demo")]
         let creator_shot = shot.clone();
+        #[cfg(feature = "demo")]
+        let creator_tour_events = cli.demo_tour_events.clone();
         eframe::run_native(
             "ZapFast",
             native_options(demo_persistence.clone()),
@@ -154,6 +174,13 @@ fn main() -> eframe::Result<()> {
                     slot: std::sync::Arc::clone(&creator_slot),
                     #[cfg(feature = "demo")]
                     shot: creator_shot,
+                    #[cfg(feature = "demo")]
+                    tour: cli.demo_tour.then(|| {
+                        zapfast::demo::tour::Tour::new(
+                            cli.demo_tour_delay.map(std::time::Duration::from_millis),
+                            creator_tour_events,
+                        )
+                    }),
                 }))
             }),
         )?;
@@ -254,9 +281,10 @@ fn demo_size_arg() -> Option<[f32; 2]> {
 
 fn native_options(demo_persistence: Option<std::path::PathBuf>) -> eframe::NativeOptions {
     let demo_size = demo_size_arg().unwrap_or([1180.0, 780.0]);
+    let demo = demo_persistence.is_some();
     let viewport = egui::ViewportBuilder::default()
-        .with_title("ZapFast")
-        .with_app_id("zapfast")
+        .with_title(if demo { "ZapFast Demo" } else { "ZapFast" })
+        .with_app_id(if demo { "zapfast-demo" } else { "zapfast" })
         .with_inner_size(demo_size)
         .with_min_inner_size([720.0, 480.0])
         .with_icon(app_icon())
@@ -268,7 +296,7 @@ fn native_options(demo_persistence: Option<std::path::PathBuf>) -> eframe::Nativ
         viewport,
         persistence_path: demo_persistence,
         // Do not restore window size during fixed-size screenshot runs.
-        persist_window: std::env::args().all(|arg| arg != "--demo" && arg != "--demo-shot"),
+        persist_window: !demo,
         // Disable vsync because hidden Wayland windows may stop receiving frame
         // callbacks and block the event loop. Repainting is event-driven.
         glow_options: eframe::egui_glow::GlowConfiguration {
@@ -285,6 +313,8 @@ struct Shell {
     slot: std::sync::Arc<std::sync::Mutex<Option<app::App>>>,
     #[cfg(feature = "demo")]
     shot: Option<Shot>,
+    #[cfg(feature = "demo")]
+    tour: Option<zapfast::demo::tour::Tour>,
 }
 
 impl Drop for Shell {
@@ -341,6 +371,13 @@ impl Shell {
 }
 
 impl eframe::App for Shell {
+    #[cfg(feature = "demo")]
+    fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
+        if let (Some(tour), Some(app)) = (&mut self.tour, &mut self.app) {
+            tour.input(app, ctx, input);
+        }
+    }
+
     /// Does not persist egui interaction state across windows. Window size and
     /// position are still persisted.
     fn persist_egui_memory(&self) -> bool {
@@ -349,6 +386,10 @@ impl eframe::App for Shell {
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(app) = self.app.as_mut() {
+            #[cfg(feature = "demo")]
+            if let Some(tour) = self.tour.as_mut() {
+                tour.drive(app, ctx);
+            }
             app.background_frame(ctx);
             #[cfg(target_os = "macos")]
             zapfast::macos::update_window(_frame, ctx, app.is_linked());
@@ -371,6 +412,10 @@ impl eframe::App for Shell {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if let Some(app) = self.app.as_mut() {
             app.frame_ui(ui);
+            #[cfg(feature = "demo")]
+            if let Some(tour) = self.tour.as_mut() {
+                tour.observe(app, ui.ctx());
+            }
         }
     }
 
@@ -403,5 +448,22 @@ fn app_icon() -> egui::IconData {
             width: SIZE as u32,
             height: SIZE as u32,
         }
+    }
+}
+
+#[cfg(all(test, feature = "demo"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tour_cli_accepts_manual_and_delayed_starts() {
+        let cli = Cli::try_parse_from(["zapfast", "--demo-tour"]).unwrap();
+        assert!(cli.demo_tour);
+        assert!(cli.demo_tour_delay.is_none());
+        let cli =
+            Cli::try_parse_from(["zapfast", "--demo-tour", "--demo-tour-delay", "5000"]).unwrap();
+        assert_eq!(cli.demo_tour_delay, Some(5000));
+        assert!(Cli::try_parse_from(["zapfast", "--demo-tour-delay", "5000"]).is_err());
+        assert!(Cli::try_parse_from(["zapfast", "--demo-tour", "--demo-page", "login",]).is_err());
     }
 }

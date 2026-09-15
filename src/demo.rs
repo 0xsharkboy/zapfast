@@ -1,4 +1,6 @@
-//! Offline sample data for screenshots and headless UI tests.
+//! Offline sample data for screenshots, recorded tours, and headless UI tests.
+
+pub mod tour;
 
 use std::collections::HashMap;
 
@@ -1046,7 +1048,7 @@ mod tests {
     use crate::paths::AppDirs;
     use crate::settings::Settings;
 
-    fn app() -> App {
+    pub(super) fn app() -> App {
         let root = std::env::temp_dir().join(format!(
             "zapfast-demo-{}-{:?}",
             std::process::id(),
@@ -1058,7 +1060,7 @@ mod tests {
     }
 
     /// Lays out several frames without a display to catch view panics.
-    fn render(app: &mut App, ctx: &egui::Context) {
+    pub(super) fn render(app: &mut App, ctx: &egui::Context) {
         for _ in 0..3 {
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(

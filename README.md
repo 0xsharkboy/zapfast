@@ -201,6 +201,7 @@ Your phone may keep showing the old linked-device name until you link again.
 cargo run --features demo -- --demo            # sample chats, no connection
 cargo run --features demo -- --demo-page login # or settings, pair, info, light, …
 cargo run --features demo -- --demo-shot shot.png --demo-page chat,light
+cargo run --features demo -- --demo-tour      # Space starts/replays a 41-second tour
 cargo test --all-features                      # includes a headless layout of every screen
 cargo clippy --all-targets --all-features -- -D warnings
 ```
@@ -215,6 +216,49 @@ ZAPFAST_GIPHY_KEY=your-key cargo build --release
 The earlier `FASTSAPP_GIPHY_KEY` build variable remains supported as a fallback.
 
 `AGENTS.md` describes the architecture and the rules for changes.
+
+### Recording a demo
+
+The `demo` feature uses offline sample chats in a fresh temporary directory.
+It does not open your linked account, read your message archive, connect to
+WhatsApp, or register a tray icon. You can run it alongside your regular app.
+
+```sh
+cargo build --locked --features demo
+./target/debug/zapfast --demo-tour --demo-size 1280x800
+```
+
+The **ZapFast Demo** window waits for **Space**. The 41-second tour starts with
+search, switches chats with keyboard shortcuts, scrolls, right-clicks a message
+and selects Reply, types quickly, completes emoji and mentions, searches the GIF
+picker and sends a still sticker, opens group information and the shortcut list,
+and changes themes through Settings. It uses the normal mouse and keyboard handlers;
+a local responder handles outgoing messages with no WhatsApp connection.
+The GIF-search thumbnails and still stickers are rendered from the bundled
+Noto emoji font; demo GIF search uses these local fixtures. The tour makes no
+sound and holds its final frame. Space rebuilds the sample and replays.
+For an automatic start, add `--demo-tour-delay 5000` (milliseconds).
+Use `--demo` instead of `--demo-tour` to explore the sample chats yourself.
+
+On Omarchy, run `omarchy screenrecord`, select the demo window, then press Space
+in ZapFast. Recording has no audio unless you explicitly enable desktop or
+microphone audio. Stop with `omarchy screenrecord --stop-recording` after the
+tour finishes. The default capture records a fixed rectangle, so keep the demo
+window visible and stationary until recording stops.
+
+To annotate the video with a visible pointer, click rings, and outlined shortcut
+labels, add `--demo-tour-events tour.json` when launching the tour. After
+recording, run:
+
+```sh
+python3 scripts/render-demo.py recording.mp4 tour.json launch.mp4 --start 0.8
+```
+
+Set `--start` to the recording time (in seconds) when you pressed Space. The
+export trims the setup footage, adds a caption band below the app, and produces
+a silent H.264 MP4. It requires `ffmpeg` with libass support and `ffprobe`.
+These annotations are added during video export, not drawn by the app. The
+trace contains only pointer coordinates and shortcut labels, not typed text.
 
 ## Disclaimer
 

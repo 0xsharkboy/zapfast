@@ -453,6 +453,8 @@ pub struct Backend {
     events: std::sync::mpsc::Receiver<Event>,
     thread: Option<std::thread::JoinHandle<()>>,
     offline: bool,
+    #[cfg(any(test, feature = "demo"))]
+    demo_commands: Option<std::sync::Mutex<Vec<Command>>>,
 }
 
 impl Backend {
@@ -481,6 +483,8 @@ impl Backend {
             events: event_rx,
             thread: Some(thread),
             offline: false,
+            #[cfg(any(test, feature = "demo"))]
+            demo_commands: None,
         }
     }
 
@@ -494,6 +498,8 @@ impl Backend {
                 events: event_rx,
                 thread: None,
                 offline: true,
+                #[cfg(any(test, feature = "demo"))]
+                demo_commands: None,
             },
             event_tx,
         )
@@ -520,9 +526,32 @@ impl Backend {
 
     pub fn send(&self, command: Command) {
         if self.offline && !matches!(command, Command::Shutdown) {
+            #[cfg(any(test, feature = "demo"))]
+            if let Some(commands) = &self.demo_commands {
+                commands
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .push(command);
+            }
             return;
         }
         let _ = self.commands.send(command);
+    }
+
+    /// Captures real UI commands for an offline demo's local responder.
+    #[cfg(any(test, feature = "demo"))]
+    pub(crate) fn record_demo_commands(&mut self) {
+        assert!(self.offline && self.thread.is_none());
+        self.demo_commands = Some(Default::default());
+    }
+
+    #[cfg(any(test, feature = "demo"))]
+    pub(crate) fn take_demo_commands(&self) -> Vec<Command> {
+        self.demo_commands
+            .as_ref()
+            .map_or_else(Vec::new, |commands| {
+                std::mem::take(&mut *commands.lock().unwrap_or_else(|p| p.into_inner()))
+            })
     }
 
     pub fn poll(&self) -> Vec<Event> {

@@ -1,12 +1,12 @@
 ---
 layout: home
 title: ZapFast
-description: A native WhatsApp client for Linux, macOS, and Windows, written in Rust.
+description: A fast, lightweight WhatsApp app for Linux, macOS, and Windows.
 permalink: /
 hero:
   name: ZapFast
   text: WhatsApp, native and fast
-  tagline: A small WhatsApp client for chats, voice messages, attachments, and notifications on Linux, macOS, and Windows.
+  tagline: A lightweight WhatsApp app for Linux, macOS, and Windows. Chat, send voice messages, and share files.
   actions:
     - theme: brand
       text: Download
@@ -26,7 +26,7 @@ hero:
 features:
   - icon: ⚡
     title: Lightweight
-    details: Opened in under a second and used about 150 MB of idle memory in our Linux test. Native Rust, with no browser engine.
+    details: Opens in under a second and uses 150MB of RAM. No browser engine.
   - icon: 🎤
     title: Voice messages
     details: Play, seek, and record voice messages in the chat. OGG/Opus support is built in.

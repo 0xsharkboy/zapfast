@@ -12,8 +12,8 @@ hero:
       text: Download
       link: /download/
     - theme: alt
-      text: See the benchmarks
-      link: /benchmarks/
+      text: What is ZapFast?
+      link: /what-is-zapfast/
     - theme: alt
       text: GitHub
       link: https://github.com/crmne/zapfast
@@ -25,10 +25,8 @@ hero:
 
 features:
   - icon: ⚡
-    title: About 87% less idle RAM
-    details: In our Linux test, ZapFast used 150 MB versus 1.13 GB for WhatsApp Web and its Chromium processes. Native Rust, with no browser engine.
-    link: /benchmarks/
-    link_text: See how we measured it
+    title: Lightweight
+    details: Opened in under a second and used about 150 MB of idle memory in our Linux test. Native Rust, with no browser engine.
   - icon: 🎤
     title: Voice messages
     details: Play, seek, and record voice messages in the chat. OGG/Opus support is built in.
@@ -48,34 +46,7 @@ features:
     link_text: Read the source
 ---
 
-## A quick tour
-
-Search and switch chats with shortcuts, right-click to reply, browse GIFs and
-stickers, and change themes. This silent demo uses sample conversations.
-
-<video class="zapfast-showcase" controls muted playsinline preload="none" poster="/assets/images/launch-demo-poster.png" aria-label="A 41-second tour of ZapFast with sample chats and keyboard shortcut captions">
-  <source src="/assets/videos/launch-demo.mp4" type="video/mp4">
-</video>
-
-## Measured on a real Linux desktop
-
-![Idle RAM: ZapFast 150 MB, WhatsApp Web and Chromium 1.13 GB. Four paired Linux runs, measured with PSS.](/assets/benchmarks/2026-09-15/memory.svg)
-
-The first window appeared in **152 ms for ZapFast versus 528 ms for Chromium**.
-We also observed the chat UI at **about 0.7 s versus 4.1 s**, with different
-detectors for the native and web interfaces. These are medians from four
-paired launches on one Linux machine, with warm caches and the same account.
-
-[Read the benchmark, including the chat-display method and raw results →](/benchmarks/)
-
 <style>
-  .zapfast-showcase {
-    display: block;
-    width: 100%;
-    height: auto;
-    border-radius: 12px;
-    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.35);
-  }
   /* Override the square hero slot to fit the screenshot. */
   .VPHero .image-container {
     width: 100% !important;

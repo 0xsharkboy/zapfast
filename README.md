@@ -3,13 +3,10 @@
 **WhatsApp, native and fast.** ZapFast is a WhatsApp client written in Rust
 with [egui](https://github.com/emilk/egui). It uses
 [whatsapp-rust](https://github.com/oxidezap/whatsapp-rust) for the WhatsApp Web
-protocol. It links to your phone as a companion device and has no browser engine.
-
-**About 87% less idle RAM in our Linux test:** 150 MB for ZapFast versus
-1.13 GB for WhatsApp Web and its Chromium processes. Across four paired runs,
-the first window appeared in 152 ms versus 528 ms. We observed the chat UI
-at about 0.7 s versus 4.1 s, using different detection methods.
-[See the measurements, method, and limits](https://zapfast.rocks/benchmarks/).
+protocol. It runs on Linux, macOS, and Windows, links to your phone as a
+companion device, and has no browser engine. In our Linux test, it opened in
+under a second and used about 150 MB of idle RAM, compared with 1.13 GB for
+WhatsApp Web and its Chromium processes. [See the measurements](https://zapfast.rocks/benchmarks/).
 
 ZapFast is a sibling of [Spotifast](https://spotifast.rocks),
 with the same native UI for a different service.

@@ -1,19 +1,16 @@
 ---
-title: ZapFast vs WhatsApp Web
+title: Memory and startup measurements
 description: Four paired Linux runs comparing idle RAM, first-window timing, and observed chat display. Includes the method and downloadable results.
 permalink: /benchmarks/
 nav_order: 4
-image: /assets/benchmarks/2026-09-15/memory.png
 ---
 
-## About 87% less idle RAM in this Linux test
+## Results
 
 ZapFast used **150 MB of idle RAM**, compared with **1.13 GB for WhatsApp Web
 and its Chromium processes**. Both clients were linked to the same account.
 These are medians from four paired runs on one Linux desktop, measured on
 15 September 2026.
-
-![ZapFast used 150 MB of idle RAM versus 1.13 GB for WhatsApp Web and Chromium, about 87% less in four paired Linux runs.](/assets/benchmarks/2026-09-15/memory.svg)
 
 | Measurement | ZapFast 0.13.1 | WhatsApp Web + Chromium |
 | --- | ---: | ---: |
@@ -30,8 +27,6 @@ header in a cropped screen capture, and WhatsApp Web's chat pane with at least
 one row in the page. Both include detection and window-placement overhead.
 They illustrate what we observed; they do not establish a precise multiplier
 for time to a fully usable or synchronized conversation.*
-
-![First window: ZapFast 152 ms, Chromium 528 ms. Chat UI observed: ZapFast 0.69 s, WhatsApp Web 4.13 s, using different detectors.](/assets/benchmarks/2026-09-15/startup.svg)
 
 [Download the memory chart](/assets/benchmarks/2026-09-15/memory.png) ·
 [Download the startup chart](/assets/benchmarks/2026-09-15/startup.png)
@@ -109,4 +104,4 @@ Windows. On Arch Linux:
 yay -S zapfast-bin
 ```
 
-[Download ZapFast](/download/) or [watch the sample-chat demo](/#a-quick-tour).
+[Download ZapFast](/download/).

@@ -366,6 +366,9 @@ Noto emoji font; demo GIF search uses these local fixtures. The tour makes no
 sound and holds its final frame. Space rebuilds the sample and replays.
 For an automatic start, add `--demo-tour-delay 5000` (milliseconds).
 Use `--demo` instead of `--demo-tour` to explore the sample chats yourself.
+For deterministic theme screenshots, `--demo-page settings,omarchy` and
+`--demo-page settings,omarchy-light` preview following dark and light Omarchy
+palettes without changing the desktop theme.
 
 On Omarchy, run `omarchy screenrecord`, select the demo window, then press Space
 in ZapFast. Recording has no audio unless you explicitly enable desktop or

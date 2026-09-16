@@ -871,6 +871,25 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                 app.scroll_to_bottom = true;
             }
             "settings" => app.page = Page::Settings,
+            "omarchy" | "omarchy-light" => {
+                let mut themes: Vec<_> = crate::theme::presets::themes().collect();
+                let filename = if part == "omarchy-light" {
+                    "Catppuccin Latte.json"
+                } else {
+                    "Catppuccin.json"
+                };
+                let mut system = themes
+                    .iter()
+                    .find(|t| t.filename == filename)
+                    .unwrap()
+                    .clone();
+                system.filename = "omarchy.json".into();
+                app.settings.theme = crate::settings::ThemeChoice::System;
+                app.settings.custom_theme = None;
+                app.settings.system_theme_cache = Some(system.clone());
+                themes.push(system);
+                app.custom_themes = crate::theme::custom::Catalog::preview(themes, true);
+            }
             choice if choice.starts_with("theme=") => {
                 let themes: Vec<_> = crate::theme::presets::themes().collect();
                 if let Some(theme) = themes
@@ -1282,6 +1301,8 @@ mod tests {
             "update-failed",
             "update-managed",
             "themes",
+            "settings,omarchy",
+            "settings,omarchy-light",
             "poll",
             "poll-create",
             "theme=Catppuccin.json",

@@ -218,6 +218,19 @@ Three egui pitfalls this code has already hit:
 
 ## Releasing
 
+Never use em dashes in user-facing writing, including release titles, release
+notes, and agent responses. Use commas, colons, parentheses, or full stops.
+
+Before writing release notes, read the previous two stable releases of
+`../spotifast` and match their style: a short plain-language summary, `New`
+and `Fixed` sections with bold user-facing results, a `Thanks` section, and
+a full-changelog link. Credit who did what on the relevant item, with issue
+or PR numbers, and acknowledge reporters separately from implementers.
+Include screenshots or short videos of the main features, especially Omarchy
+theme integration when relevant. Capture only synthetic offline demo content,
+never real chats. Verify every media link and do not leave generated notes
+in place. Describe known limitations honestly.
+
 Do not cut a release for every fix. Work accumulates on `main` until
 there is something substantial to announce: a feature, or a batch of
 fixes worth a changelog entry. Five patch releases in a day is what this

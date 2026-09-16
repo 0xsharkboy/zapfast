@@ -437,17 +437,20 @@ pub fn setting_row(
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.set_width((ui.available_width() - 260.0).max(120.0));
-            theme::text(ui, label, theme::medium(14.0), palette.text);
+            rich_text(ui, label, theme::medium(14.0), palette.text);
             if !description.is_empty() {
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(description)
-                            .font(theme::regular(12.5))
-                            .color(palette.secondary),
-                    )
-                    .wrap()
-                    .selectable(false),
+                let description = line(
+                    ui,
+                    description,
+                    theme::regular(12.5),
+                    palette.secondary,
+                    ui.available_width(),
+                    usize::MAX,
                 );
+                let (rect, _) = ui.allocate_exact_size(description.size(), Sense::hover());
+                if ui.is_rect_visible(rect) {
+                    description.paint(ui, rect.min, palette.secondary);
+                }
             }
         });
         ui.with_layout(Layout::right_to_left(Align::Center), control);

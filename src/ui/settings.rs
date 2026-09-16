@@ -55,12 +55,6 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     let detail = app.custom_themes.detail(selected);
                     let detail = if detail.is_empty() { selected.map(theme::custom::label).unwrap_or("Choose a JSON palette from the themes folder.") } else { detail };
                     widgets::setting_row(ui, &palette, "Local themes", detail, |ui| {
-                        if theme::soft_button(ui, &palette, None, "Reload", false).clicked() {
-                            app.actions.push(Action::ReloadThemes);
-                        }
-                        if theme::soft_button(ui, &palette, None, "Open folder", false).clicked() {
-                            app.actions.push(Action::OpenThemesFolder);
-                        }
                         egui::ComboBox::from_id_salt("local-theme")
                             .selected_text("Choose a palette")
                             .show_ui(ui, |ui| {
@@ -68,6 +62,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                                     if widgets::menu_item(ui, &palette, None, theme::custom::label(&custom.filename)) {
                                         app.actions.push(Action::SetCustomTheme(custom.filename.clone()));
                                     }
+                                }
+                                ui.separator();
+                                if widgets::menu_item(ui, &palette, Some(Icon::ExternalLink), "Open folder") {
+                                    app.actions.push(Action::OpenThemesFolder);
+                                }
+                                if widgets::menu_item(ui, &palette, Some(Icon::Refresh), "Reload themes") {
+                                    app.actions.push(Action::ReloadThemes);
                                 }
                             });
                     });

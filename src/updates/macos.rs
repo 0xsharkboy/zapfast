@@ -255,7 +255,7 @@ mod tests {
             std::env::temp_dir().join(format!("zapfast-image-test-{}", rand::random::<u64>()));
         fs::create_dir(&root).unwrap();
         assert!(image_bundle(&root).is_err());
-        let legacy = root.join("ZapFast.app");
+        let legacy = root.join("FastsApp.app");
         fs::create_dir(&legacy).unwrap();
         assert_eq!(image_bundle(&root).unwrap(), legacy);
         let app = root.join("ZapFast.app");

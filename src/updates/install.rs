@@ -607,6 +607,80 @@ pub fn acknowledge(job: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn helper_restarts_a_verified_update_and_rolls_back_a_failed_start() {
+        use std::os::unix::fs::PermissionsExt;
+        for starts in [true, false] {
+            let directory = tempfile::tempdir().unwrap();
+            let target = directory.path().join("zapfast");
+            let original =
+                b"#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$(dirname \"$0\")/restart-arguments\"\n";
+            fs::write(&target, original).unwrap();
+            fs::set_permissions(&target, fs::Permissions::from_mode(0o755)).unwrap();
+            let installation = Installation {
+                executable: target.clone(),
+                kind: Kind::Portable,
+            };
+            let stage = staging(&installation).unwrap();
+            let payload = stage.join("next");
+            let incoming: &[u8] = if starts {
+                b"#!/bin/sh\nprintf started > \"$(dirname \"$2\")/started\"\n"
+            } else {
+                b"#!/bin/sh\nexit 1\n"
+            };
+            fs::write(&payload, incoming).unwrap();
+            fs::set_permissions(&payload, fs::Permissions::from_mode(0o755)).unwrap();
+            let prepared = Prepared {
+                installation,
+                directory: stage.clone(),
+                payload: payload.clone(),
+                sha256: hash(&payload).unwrap(),
+                version: "99.0.0".into(),
+            };
+            // Simulate a parent which exits after the helper starts watching it.
+            let mut parent = Command::new("/bin/sleep").arg("0.2").spawn().unwrap();
+            let job = stage.join("handoff.json");
+            serde_json::to_writer(
+                File::create(&job).unwrap(),
+                &Handoff {
+                    prepared,
+                    parent: parent.id(),
+                    arguments: Vec::new(),
+                },
+            )
+            .unwrap();
+            let result = run_helper(&job);
+            parent.wait().unwrap();
+            assert!(stage.join("ready").is_file());
+            assert_eq!(fs::read(stage.join("previous")).unwrap(), original);
+            if starts {
+                result.unwrap();
+                assert_eq!(fs::read(&target).unwrap(), incoming);
+                assert!(stage.join("started").is_file());
+            } else {
+                assert!(result.is_err());
+                assert_eq!(fs::read(&target).unwrap(), original);
+                let arguments = directory.path().join("restart-arguments");
+                let deadline = Instant::now() + Duration::from_secs(3);
+                while !fs::read_to_string(&arguments)
+                    .is_ok_and(|text| text.contains("--update-error"))
+                {
+                    assert!(
+                        Instant::now() < deadline,
+                        "rollback did not restart the original app"
+                    );
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                assert!(
+                    fs::read_to_string(arguments)
+                        .unwrap()
+                        .contains("--update-error")
+                );
+            }
+        }
+    }
+
     #[test]
     fn an_interrupted_backup_is_never_available_to_rollback() {
         struct InterruptedCopy(bool);

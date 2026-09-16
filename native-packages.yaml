@@ -131,12 +131,16 @@ assets:
   ARM64:
     file: zapfast-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
     local: dist/zapfast-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+  MACOS:
+    file: zapfast-v@VERSION@-macos-universal.dmg
+    local: dist/zapfast-v@VERSION@-macos-universal.dmg
   SOURCE:
     file: zapfast-@VERSION@.tar.gz
     url: https://github.com/crmne/zapfast/archive/refs/tags/v@VERSION@.tar.gz
     checksummed: false
     local: dist/zapfast-@VERSION@.tar.gz
 templates:
+  homebrew/zapfast.rb: packaging/homebrew/zapfast.rb.in
   arch/zapfast/PKGBUILD: packaging/arch/zapfast/PKGBUILD.in
   arch/zapfast/zapfast.install: packaging/arch/zapfast.install
   arch/zapfast-bin/PKGBUILD: packaging/arch/zapfast-bin/PKGBUILD.in
@@ -144,6 +148,16 @@ templates:
   arch/zapfast-git/PKGBUILD: packaging/arch/zapfast-git/PKGBUILD.in
   arch/zapfast-git/zapfast-git.install: packaging/arch/zapfast.install
 repositories:
+  homebrew:
+    url: https://github.com/crmne/homebrew-tap.git
+    push_url: https://github.com/crmne/homebrew-tap.git
+    branch: main
+    package_path: Casks
+    files:
+      homebrew/zapfast.rb: Casks/zapfast.rb
+    version_file: Casks/zapfast.rb
+    version_pattern: 'version "([^"]+)"'
+    publish: push
   aur-source:
     group: aur
     url: https://aur.archlinux.org/zapfast.git

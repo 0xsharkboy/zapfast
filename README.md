@@ -150,6 +150,8 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
 
 ## Installing
 
+On macOS with Homebrew: `brew install --cask crmne/tap/zapfast`.
+
 ZapFast was previously called FastsApp. Version 0.13.0 introduces the new
 package and executable names. On Arch Linux:
 

@@ -46,9 +46,10 @@ instructions: |
   investigation, never for information already supplied. Choose source files
   for a useful technical answer and cite only what those files establish;
   otherwise leave reply null. Leave uncertain diagnoses and product decisions
-  to the maintainer. Compare possible duplicates with supplied issues; close
-  only clear duplicates under the configured rules. Name a fixed version only
-  when supplied release evidence establishes it; code on main is not a release.
+  to the maintainer. Use the tools to search and read relevant docs, source,
+  issues, and releases. Close only clear duplicates under the configured rules.
+  Name a fixed version only when release evidence establishes it; code on main
+  is not a release.
   Do not promise
   implementation, releases, or tests. Never repeat secrets or private data.
   Keep replies short, direct, and free of status chatter, implementation

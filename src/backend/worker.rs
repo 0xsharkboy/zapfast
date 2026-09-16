@@ -297,6 +297,8 @@ struct ParsedChat {
     archived: bool,
     pinned: bool,
     muted_until: Option<i64>,
+    ephemeral_expiration: Option<u32>,
+    ephemeral_setting_timestamp: Option<i64>,
     last_activity: i64,
     pn_jid: Option<String>,
     lid_jid: Option<String>,
@@ -323,6 +325,26 @@ struct ParsedMessage {
 }
 
 impl Worker {
+    fn ephemeral_expiration(&self, chat: &str) -> Option<u32> {
+        self.archive
+            .ephemeral_expiration(chat)
+            .ok()
+            .flatten()
+            .filter(|expiration| *expiration > 0)
+    }
+
+    fn default_ephemeral_expiration(&self) -> Option<u32> {
+        self.archive
+            .meta("default_ephemeral_expiration")
+            .ok()
+            .flatten()
+            .and_then(|value| value.parse().ok())
+    }
+
+    fn apply_ephemeral(&self, chat: &str, message: &mut wa::Message) -> Option<u32> {
+        apply_ephemeral_expiration(message, self.ephemeral_expiration(chat))
+    }
+
     fn emit(&self, event: Event) {
         let _ = self.events.send(event);
         self.waker.wake();
@@ -877,6 +899,15 @@ impl Worker {
                         name: (!metadata.subject.is_empty()).then(|| metadata.subject.clone()),
                         participants,
                         read_only: metadata.is_announcement && !admin,
+                        // GroupEphemeralSettings carries a trigger mode, not a
+                        // timestamp; a zero setting timestamp keeps later
+                        // authoritative updates (protocol messages) able to
+                        // override the value fetched here.
+                        ephemeral_expiration: metadata
+                            .ephemeral
+                            .as_ref()
+                            .and_then(|value| value.expiration),
+                        ephemeral_setting_timestamp: None,
                     });
                 }
                 Err(error) => {
@@ -1094,6 +1125,34 @@ impl Worker {
                 self.emit_chat(&chat);
             }
             E::HistorySync(lazy) => self.on_history_sync(lazy).await,
+            E::DisappearingModeChanged(update) => {
+                // The notification names the chat whose timer changed (WA
+                // Web: WAWebUpdateDisappearingModeForContact), so it seeds the
+                // chat first. Only when the chat is our own does it also state
+                // the account default for new chats.
+                let id = self.canonical(&update.from);
+                let timestamp = update.setting_timestamp.timestamp();
+                self.ensure_chat(&id, None);
+                let _ = self.archive.set_ephemeral(&id, update.duration, timestamp);
+                if self.is_me(&id) {
+                    let stored = self
+                        .archive
+                        .meta("default_ephemeral_setting_timestamp")
+                        .ok()
+                        .flatten()
+                        .and_then(|value| value.parse::<i64>().ok())
+                        .unwrap_or_default();
+                    if timestamp >= stored {
+                        let _ = self
+                            .archive
+                            .set_meta("default_ephemeral_expiration", &update.duration.to_string());
+                        let _ = self.archive.set_meta(
+                            "default_ephemeral_setting_timestamp",
+                            &timestamp.to_string(),
+                        );
+                    }
+                }
+            }
             E::PictureUpdate(update) => {
                 let id = self.canonical(&update.jid);
                 let _ = std::fs::remove_file(self.avatar_file(&id, false));
@@ -1349,12 +1408,33 @@ impl Worker {
         };
         let push_name = (!info.push_name.is_empty()).then(|| info.push_name.clone());
         let base = message.get_base_message();
+        if let Some(expiration) = info.ephemeral_expiration
+            && self
+                .archive
+                .ephemeral_expiration(&chat)
+                .ok()
+                .flatten()
+                .is_none()
+        {
+            self.ensure_chat(&chat, push_name.as_deref());
+            let _ = self.archive.set_ephemeral(&chat, expiration, 0);
+        }
 
         if let Some(protocol) = base.protocol_message.as_option() {
+            use wa::message::protocol_message::Type;
+            if protocol.r#type == Some(Type::EPHEMERAL_SETTING) {
+                if let (Some(expiration), Some(timestamp)) = (
+                    protocol.ephemeral_expiration,
+                    protocol.ephemeral_setting_timestamp,
+                ) {
+                    self.ensure_chat(&chat, push_name.as_deref());
+                    let _ = self.archive.set_ephemeral(&chat, expiration, timestamp);
+                }
+                return;
+            }
             let Some(target) = protocol.key.as_option().and_then(|key| key.id.clone()) else {
                 return;
             };
-            use wa::message::protocol_message::Type;
             match protocol.r#type {
                 Some(Type::REVOKE) => {
                     if let Ok(true) =
@@ -1745,6 +1825,13 @@ impl Worker {
                     continue;
                 }
             }
+            if let Some(expiration) = chat.ephemeral_expiration {
+                let _ = self.archive.set_ephemeral(
+                    &id,
+                    expiration,
+                    chat.ephemeral_setting_timestamp.unwrap_or_default(),
+                );
+            }
             if ChatKind::from_id(&id) == ChatKind::Group {
                 self.request_group_info(&id, false);
             }
@@ -1977,8 +2064,21 @@ impl Worker {
             Command::LoadUntil { chat, id, before } => self.load_until(chat, id, before),
             Command::SearchMessages { query } => self.search_messages(query),
             Command::EnsureChat { chat, name } => {
+                let is_new = self.archive.chat(&chat).ok().flatten().is_none();
                 if let Err(error) = self.archive.ensure_chat(&chat, &name) {
                     log::warn!("could not create the chat: {error}");
+                } else if is_new
+                    && ChatKind::from_id(&chat) == ChatKind::Direct
+                    && let Some(expiration) = self.default_ephemeral_expiration()
+                {
+                    let timestamp = self
+                        .archive
+                        .meta("default_ephemeral_setting_timestamp")
+                        .ok()
+                        .flatten()
+                        .and_then(|value| value.parse().ok())
+                        .unwrap_or_default();
+                    let _ = self.archive.set_ephemeral(&chat, expiration, timestamp);
                 }
             }
             Command::Download { chat, message } => self.download(chat, message),
@@ -2425,11 +2525,20 @@ impl Worker {
                 name,
                 participants,
                 read_only,
+                ephemeral_expiration,
+                ephemeral_setting_timestamp,
             } => {
                 self.group_info_tries.remove(&chat);
                 let _ =
                     self.archive
                         .set_group_info(&chat, name.as_deref(), &participants, read_only);
+                if let Some(expiration) = ephemeral_expiration {
+                    let _ = self.archive.set_ephemeral(
+                        &chat,
+                        expiration,
+                        ephemeral_setting_timestamp.unwrap_or_default(),
+                    );
+                }
                 self.emit_chat(&chat);
             }
         }
@@ -2481,7 +2590,8 @@ impl Worker {
             quoted_row = Some(row);
             Some(context)
         });
-        let message = outgoing_text(text.clone(), context, &mentions);
+        let mut message = outgoing_text(text.clone(), context, &mentions);
+        let expiration = self.apply_ephemeral(&chat, &mut message);
         let mentions = self.mentions_of(&mentions);
         let id = client.generate_message_id();
         let row = Message {
@@ -2522,6 +2632,7 @@ impl Worker {
             jid,
             id,
             message,
+            expiration,
         ));
     }
 
@@ -2557,7 +2668,8 @@ impl Worker {
         };
         // whatsapp-rust owns the forwarding rules: unwrap transient wrappers,
         // strip quote chains and secrets, and retain reusable media metadata.
-        let message = *original.get_base_message().prepare_for_forward();
+        let (message, expiration) =
+            outgoing_forward(&original, self.ephemeral_expiration(&to_chat));
         let id = client.generate_message_id();
         let mentions = self.mentions_of(&mentioned_of(&message));
         let thumbnail = thumbnail_of(&message).or_else(|| source.thumbnail.clone());
@@ -2578,6 +2690,7 @@ impl Worker {
             jid,
             id,
             message,
+            expiration,
         ));
     }
 
@@ -3303,7 +3416,8 @@ impl Worker {
             self.emit_message(&chat, &id);
             self.emit_chat(&chat);
         }
-        let message = outgoing_text(text, None, &mentions);
+        let mut message = outgoing_text(text, None, &mentions);
+        self.apply_ephemeral(&chat, &mut message);
         let commands = self.commands.clone();
         tokio::spawn(async move {
             if let Err(error) = client.edit_message(jid, id.clone(), message).await {
@@ -3643,10 +3757,12 @@ impl Worker {
             self.emit(Event::Error("Not connected to WhatsApp".to_owned()));
             return;
         };
-        let Ok(message) = wa::Message::decode_from_slice(&raw) else {
+        let Ok(mut message) = wa::Message::decode_from_slice(&raw) else {
             self.emit(Event::Error("Could not encode the attachment".to_owned()));
             return;
         };
+        let expiration = self.apply_ephemeral(&chat, &mut message);
+        let raw = message.encode_to_vec();
         let id = row.id.clone();
         self.store_message(row, Some(raw), None);
         tokio::spawn(send_outgoing(
@@ -3656,6 +3772,7 @@ impl Worker {
             jid,
             id,
             message,
+            expiration,
         ));
     }
 
@@ -3687,6 +3804,27 @@ impl Worker {
 
 // --- free helpers ----------------------------------------------------------
 
+fn outgoing_forward(original: &wa::Message, expiration: Option<u32>) -> (wa::Message, Option<u32>) {
+    let mut message = *original.get_base_message().prepare_for_forward();
+    if let Some(mut context) = context_of(&message).cloned() {
+        // A forward belongs to the destination chat. The library retains the
+        // source timer, including when the destination has no timer at all.
+        context.expiration = None;
+        context.ephemeral_setting_timestamp = None;
+        context.ephemeral_shared_secret = None;
+        message.set_context_info(context);
+    }
+    let expiration = apply_ephemeral_expiration(&mut message, expiration);
+    (message, expiration)
+}
+
+fn apply_ephemeral_expiration(message: &mut wa::Message, expiration: Option<u32>) -> Option<u32> {
+    let expiration = expiration.filter(|expiration| *expiration > 0)?;
+    message
+        .set_ephemeral_expiration(expiration)
+        .then_some(expiration)
+}
+
 async fn send_outgoing(
     client: Arc<Client>,
     commands: mpsc::UnboundedSender<Command>,
@@ -3694,6 +3832,7 @@ async fn send_outgoing(
     jid: Jid,
     id: String,
     message: wa::Message,
+    ephemeral_expiration: Option<u32>,
 ) {
     let result = async {
         if jid.is_group() {
@@ -3733,12 +3872,12 @@ async fn send_outgoing(
                 return Err("Could not save the group message recipients".to_owned());
             }
         }
+        let mut options = SendOptions::default().with_message_id(id.clone());
+        if let Some(expiration) = ephemeral_expiration {
+            options = options.with_ephemeral_expiration(expiration);
+        }
         client
-            .send_message_with_options(
-                jid,
-                message,
-                SendOptions::default().with_message_id(id.clone()),
-            )
+            .send_message_with_options(jid, message, options)
             .await
             .map_err(|error| error.to_string())?;
         Ok(())
@@ -3882,7 +4021,11 @@ fn context_of(base: &wa::Message) -> Option<&wa::ContextInfo> {
     if let Some(image) = base.image_message.as_option() {
         return image.context_info.as_option();
     }
-    if let Some(video) = base.video_message.as_option() {
+    if let Some(video) = base
+        .video_message
+        .as_option()
+        .or(base.ptv_message.as_option())
+    {
         return video.context_info.as_option();
     }
     if let Some(audio) = base.audio_message.as_option() {
@@ -3897,8 +4040,22 @@ fn context_of(base: &wa::Message) -> Option<&wa::ContextInfo> {
     if let Some(location) = base.location_message.as_option() {
         return location.context_info.as_option();
     }
+    if let Some(location) = base.live_location_message.as_option() {
+        return location.context_info.as_option();
+    }
     if let Some(contact) = base.contact_message.as_option() {
         return contact.context_info.as_option();
+    }
+    if let Some(contacts) = base.contacts_array_message.as_option() {
+        return contacts.context_info.as_option();
+    }
+    if let Some(poll) = base
+        .poll_creation_message
+        .as_option()
+        .or(base.poll_creation_message_v2.as_option())
+        .or(base.poll_creation_message_v3.as_option())
+    {
+        return poll.context_info.as_option();
     }
     None
 }
@@ -4793,6 +4950,8 @@ fn parse_conversation(conversation: wa::Conversation) -> ParsedChat {
             .mute_end_time
             .filter(|end| *end > 0)
             .map(|end| seconds(end as i64)),
+        ephemeral_expiration: conversation.ephemeral_expiration,
+        ephemeral_setting_timestamp: conversation.ephemeral_setting_timestamp,
         last_activity,
         pn_jid: conversation.pn_jid.clone(),
         lid_jid: conversation.lid_jid.clone(),
@@ -4910,6 +5069,116 @@ mod tests {
         let context = context_of(&message).expect("text context");
         assert_eq!(context.stanza_id.as_deref(), Some("quoted"));
         assert_eq!(context.mentioned_jid, mentions);
+    }
+
+    #[test]
+    fn missing_or_disabled_expiration_leaves_message_normal() {
+        for expiration in [None, Some(0)] {
+            let mut message = wa::Message::text("hello");
+            assert_eq!(apply_ephemeral_expiration(&mut message, expiration), None);
+            assert_eq!(message.get_ephemeral_expiration(), None);
+        }
+    }
+
+    #[test]
+    fn configured_expiration_is_added_to_text() {
+        for expiration in [86_400, 604_800, 7_776_000] {
+            let mut message = wa::Message::text("hello");
+            assert_eq!(
+                apply_ephemeral_expiration(&mut message, Some(expiration)),
+                Some(expiration)
+            );
+            assert_eq!(message.get_ephemeral_expiration(), Some(expiration));
+        }
+    }
+
+    #[test]
+    fn ephemeral_reply_preserves_quote_context() {
+        let mut message = outgoing_text(
+            "reply".to_owned(),
+            Some(wa::ContextInfo {
+                stanza_id: Some("quoted".to_owned()),
+                ..Default::default()
+            }),
+            &[],
+        );
+
+        apply_ephemeral_expiration(&mut message, Some(604_800));
+
+        let context = context_of(&message).expect("context");
+        assert_eq!(context.stanza_id.as_deref(), Some("quoted"));
+        assert_eq!(context.expiration, Some(604_800));
+    }
+
+    #[test]
+    fn ephemeral_media_preserves_caption() {
+        let mut message = wa::Message {
+            image_message: MessageField::some(wa::message::ImageMessage {
+                caption: Some("look".to_owned()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        apply_ephemeral_expiration(&mut message, Some(7_776_000));
+
+        let image = message.image_message.as_option().expect("image");
+        assert_eq!(image.caption.as_deref(), Some("look"));
+        assert_eq!(
+            image
+                .context_info
+                .as_option()
+                .and_then(|info| info.expiration),
+            Some(7_776_000)
+        );
+    }
+
+    #[test]
+    fn forwards_use_only_the_destination_timer() {
+        let context = wa::ContextInfo {
+            expiration: Some(7_776_000),
+            ephemeral_setting_timestamp: Some(123),
+            ephemeral_shared_secret: Some(vec![1, 2, 3]),
+            is_forwarded: Some(true),
+            forwarding_score: Some(2),
+            ..Default::default()
+        };
+        let text = wa::Message::text_with_context("forward me", context.clone());
+        let image = wa::Message {
+            image_message: MessageField::some(wa::message::ImageMessage {
+                caption: Some("caption".into()),
+                direct_path: Some("/media/path".into()),
+                context_info: MessageField::some(context.clone()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let contacts = wa::Message {
+            contacts_array_message: MessageField::some(wa::message::ContactsArrayMessage {
+                context_info: MessageField::some(context),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        for original in [text, image, contacts] {
+            for timer in [None, Some(0), Some(86_400)] {
+                let expected = timer.filter(|value| *value > 0);
+                let (forward, expiration) = outgoing_forward(&original, timer);
+                assert_eq!(expiration, expected);
+                assert_eq!(forward.get_ephemeral_expiration(), expected);
+                let context = context_of(&forward).unwrap();
+                assert_eq!(context.expiration, expected);
+                assert_eq!(context.ephemeral_setting_timestamp, None);
+                assert_eq!(context.ephemeral_shared_secret, None);
+                assert_eq!(context.is_forwarded, Some(true));
+                assert_eq!(context.forwarding_score, Some(3));
+                if let Some(image) = forward.image_message.as_option() {
+                    assert_eq!(image.caption.as_deref(), Some("caption"));
+                    assert_eq!(image.direct_path.as_deref(), Some("/media/path"));
+                }
+                assert_eq!(original.get_ephemeral_expiration(), Some(7_776_000));
+            }
+        }
     }
 
     #[test]
@@ -5185,6 +5454,19 @@ mod receipt_tests {
         assert_eq!(status(&worker, "old"), Delivery::Sent);
         send(&mut worker, PEER, ReceiptType::Delivered);
         assert_eq!(status(&worker, "new"), Delivery::Read);
+    }
+
+    #[test]
+    fn history_keeps_ephemeral_metadata() {
+        let parsed = parse_conversation(wa::Conversation {
+            id: PEER.into(),
+            ephemeral_expiration: Some(7_776_000),
+            ephemeral_setting_timestamp: Some(1_700_000_000),
+            ..Default::default()
+        });
+
+        assert_eq!(parsed.ephemeral_expiration, Some(7_776_000));
+        assert_eq!(parsed.ephemeral_setting_timestamp, Some(1_700_000_000));
     }
 
     #[test]

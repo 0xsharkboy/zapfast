@@ -673,6 +673,7 @@ pub enum Action {
     ToggleSidebar,
     FocusSearch,
     FocusComposer,
+    HideShortcutHints,
     ScrollToBottom,
     /// Scrolls the open chat to a message.
     ScrollTo(String),

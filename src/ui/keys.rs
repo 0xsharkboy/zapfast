@@ -15,6 +15,14 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
         };
         key(Modifiers::COMMAND, Key::F, Action::FocusSearch);
         key(Modifiers::COMMAND, Key::K, Action::FocusSearch);
+        if app.page == Page::Chats
+            && app.open_chat.is_some()
+            && app.dialog.is_none()
+            && !app.show_update
+            && app.recording.is_none()
+        {
+            key(Modifiers::COMMAND, Key::L, Action::FocusComposer);
+        }
         key(Modifiers::COMMAND, Key::B, Action::ToggleSidebar);
         key(Modifiers::COMMAND, Key::Comma, Action::Open(Page::Settings));
         key(Modifiers::COMMAND, Key::Q, Action::Quit);
@@ -105,6 +113,7 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
 /// Shortcuts shown in the help dialog.
 pub const SHORTCUTS: &[(&str, &str)] = &[
     ("Ctrl+F / Ctrl+K", "Search chats"),
+    ("Ctrl+L", "Focus the message input"),
     ("Alt+↑ / Alt+↓", "Previous / next chat"),
     ("Enter", "Send (Shift+Enter for a new line)"),
     (
@@ -150,6 +159,46 @@ mod tests {
             |ui| handle(app, ui.ctx()),
         );
         output.textures_delta.clear();
+    }
+
+    #[test]
+    fn focus_input_shortcut_only_targets_an_available_composer() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = App::headless(
+            crate::paths::AppDirs::under(root.path()),
+            crate::settings::Settings::default(),
+        )
+        .0;
+        let ctx = egui::Context::default();
+        for (page, chat, dialog, expected) in [
+            (Page::Chats, Some("fixture"), None, true),
+            (Page::Chats, None, None, false),
+            (Page::Settings, Some("fixture"), None, false),
+            (Page::Chats, Some("fixture"), Some(Dialog::Shortcuts), false),
+        ] {
+            app.page = page;
+            app.open_chat = chat.map(str::to_owned);
+            app.dialog = dialog;
+            app.actions.clear();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key: Key::L,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: Modifiers::COMMAND,
+                    }],
+                    ..Default::default()
+                },
+                |ui| handle(&mut app, ui.ctx()),
+            );
+            output.textures_delta.clear();
+            assert_eq!(
+                matches!(app.actions.as_slice(), [Action::FocusComposer]),
+                expected
+            );
+        }
     }
 
     #[test]

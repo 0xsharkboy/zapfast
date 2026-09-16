@@ -2339,6 +2339,10 @@ impl App {
                     }
                 });
             }
+            Action::HideShortcutHints => {
+                self.settings.show_shortcut_hints = false;
+                self.mark_settings_dirty();
+            }
             Action::SettingsChanged => self.mark_settings_dirty(),
             Action::ZoomBy(delta) => {
                 self.settings.zoom = (self.settings.zoom + delta).clamp(0.6, 2.0);
@@ -3312,6 +3316,21 @@ mod tests {
 
         assert_eq!(text, "hello @Miranda");
         assert!(mentions.is_empty());
+    }
+
+    #[test]
+    fn dismissing_shortcut_hints_persists_and_focusing_keeps_the_draft() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.composer = "Unsent draft".into();
+        app.focus_search = true;
+        app.apply(Action::HideShortcutHints, &ctx);
+        assert!(!app.settings.show_shortcut_hints);
+        assert!(app.settings_dirty);
+        app.apply(Action::FocusComposer, &ctx);
+        assert!(app.focus_composer);
+        assert!(!app.focus_search);
+        assert_eq!(app.composer, "Unsent draft");
     }
 
     #[test]

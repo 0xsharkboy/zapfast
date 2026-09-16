@@ -1034,6 +1034,18 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                 });
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
+                    if theme::icon_button(
+                        ui,
+                        Icon::X,
+                        13.0,
+                        palette.dim,
+                        palette.secondary,
+                        "Hide shortcut hints (restore in Settings)",
+                    )
+                    .clicked()
+                    {
+                        app.actions.push(Action::HideShortcutHints);
+                    }
                     theme::text(ui, &hint, theme::regular(11.0), palette.dim);
                     // Open the shortcut list without consuming typed `?`.
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

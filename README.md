@@ -130,7 +130,9 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
   selectable.
 - **Keyboard shortcuts.** `Ctrl+K` searches, `Alt+↑/↓` switches chats and
   keeps the active chat visible in the list, `Esc` cancels the current action,
-  and `Ctrl+/` lists all shortcuts.
+  `Ctrl+L` focuses the message input, and `Ctrl+/` lists all shortcuts (use
+  Command instead of Ctrl on macOS). The × at the left of the shortcut hints
+  hides the bar; restore it with **Show shortcut hints** in Settings.
 - **Local storage.** Messages, contacts and sticker metadata are stored in a
   SQLCipher-encrypted archive, unlocked automatically through your OS keyring.
   Existing plaintext archives are migrated on first use. Attachments remain

@@ -31,6 +31,9 @@ use whatsapp_rust::wacore_binary::jid::JidExt;
 use whatsapp_rust::waproto::buffa::Message as _;
 use whatsapp_rust::{MediaRetryResult, MediaReuploadRequest};
 
+mod poll_history;
+mod polls;
+
 use super::{Command, Event, LinkStatus, Waker, read_sync::ReadSync};
 use crate::app::PAGE;
 use crate::archive::Archive;
@@ -206,6 +209,9 @@ pub async fn run(
         sticker_fetches: HashSet::new(),
         sticker_downloads: HashSet::new(),
         read_sync: ReadSync::default(),
+        poll_decrypting: 0,
+        poll_history: Default::default(),
+        poll_sending: HashSet::new(),
     };
     worker.load_state();
     worker.backfill();
@@ -238,6 +244,8 @@ pub async fn run(
                 worker.retry_avatars();
                 worker.pump_group_info();
                 worker.pump_read_sync();
+                worker.pump_poll_votes();
+                worker.pump_poll_history();
             }
         }
     }
@@ -246,6 +254,9 @@ pub async fn run(
 
 struct Worker {
     read_sync: ReadSync,
+    poll_decrypting: usize,
+    poll_history: poll_history::Requests,
+    poll_sending: HashSet<(ChatId, String)>,
     dirs: AppDirs,
     events: std::sync::mpsc::Sender<Event>,
     commands: mpsc::UnboundedSender<Command>,
@@ -313,6 +324,15 @@ struct ParsedChat {
     more_on_phone: Option<bool>,
     messages: Vec<ParsedMessage>,
     revoked: Vec<String>,
+    poll_updates: Vec<HistoryPollUpdate>,
+}
+
+struct HistoryPollUpdate {
+    id: String,
+    sender: Option<String>,
+    from_me: bool,
+    timestamp: i64,
+    update: wa::message::PollUpdateMessage,
 }
 
 struct ParsedMessage {
@@ -329,6 +349,8 @@ struct ParsedMessage {
     forwarded: bool,
     thumbnail: Option<Vec<u8>>,
     raw: Vec<u8>,
+    poll_secret: Option<Vec<u8>>,
+    poll_votes: Vec<wa::PollUpdate>,
 }
 
 impl Worker {
@@ -401,7 +423,8 @@ impl Worker {
     }
 
     fn emit_message(&self, chat: &str, id: &str) {
-        if let Ok(Some(message)) = self.archive.message(chat, id) {
+        if let Ok(Some(mut message)) = self.archive.message(chat, id) {
+            self.polish(&mut message);
             self.emit(Event::MessageUpdated(Box::new(message)));
         }
     }
@@ -981,6 +1004,9 @@ impl Worker {
                 self.set_status(LinkStatus::Connected);
                 self.retry_avatars();
                 self.pump_read_sync();
+                self.poll_history.reconnect(Instant::now());
+                let _ = self.archive.retry_poll_votes();
+                self.pump_poll_votes();
                 if let Some(client) = self.client.clone() {
                     let me = self.me_pn.clone().and_then(|pn| Self::jid_of(&pn));
                     let commands = self.commands.clone();
@@ -1234,6 +1260,8 @@ impl Worker {
         self.group_info_retry.clear();
         self.presence_subscribed.clear();
         self.read_sync = ReadSync::default();
+        self.poll_sending.clear();
+        self.poll_history = Default::default();
         self.pending_older.clear();
         self.pending_avatars.clear();
         self.me_pn = None;
@@ -1486,6 +1514,17 @@ impl Worker {
             }
             return;
         }
+        if let Some(update) = base.poll_update_message.as_option() {
+            self.ingest_poll_vote(
+                &chat,
+                &info.id,
+                &info.source.sender.to_non_ad_string(),
+                from_me,
+                info.timestamp.timestamp(),
+                update,
+            );
+            return;
+        }
         let Some(content) = classify(base) else {
             return;
         };
@@ -1513,7 +1552,12 @@ impl Worker {
             forwarded: forwarded_of(base),
             thumbnail: thumbnail_of(base),
         };
+        let is_poll = matches!(row.content, Content::Poll { .. });
+        self.remember_poll(&row, message, &info.source.sender.to_non_ad_string(), None);
         self.store_message(row, Some(message.encode_to_vec()), push_name.as_deref());
+        if is_poll {
+            self.pump_poll_votes();
+        }
     }
 
     fn ingest_undecryptable(&mut self, info: &MessageInfo) {
@@ -1597,12 +1641,13 @@ impl Worker {
             // conversation there. Replayed replies cannot clear newer arrivals.
             let _ = self.archive.mark_read_to(&chat, &message.id);
         }
-        let stored = self
+        let mut stored = self
             .archive
             .message(&chat, &message.id)
             .ok()
             .flatten()
             .unwrap_or(message);
+        self.polish(&mut stored);
         // Notify only for live incoming messages, not history replay.
         let incoming = (unread && !self.syncing).then(|| stored.clone());
         self.emit(Event::Messages {
@@ -1844,6 +1889,11 @@ impl Worker {
             }
             let count = chat.messages.len();
             for message in chat.messages {
+                let poll_creator = if message.from_me {
+                    self.me()
+                } else {
+                    message.sender.clone().unwrap_or_else(|| chat.id.clone())
+                };
                 let sender = if message.from_me {
                     self.me()
                 } else {
@@ -1904,9 +1954,40 @@ impl Worker {
                     forwarded: message.forwarded,
                     thumbnail: message.thumbnail,
                 };
+                if matches!(row.content, Content::Poll { .. }) {
+                    if let Ok(raw) = wa::Message::decode_from_slice(&message.raw) {
+                        self.remember_poll(
+                            &row,
+                            &raw,
+                            &poll_creator,
+                            message.poll_secret.as_deref(),
+                        );
+                    }
+                    self.history_poll_votes(&row, &message.poll_votes);
+                }
                 if let Err(error) = self.archive.insert_message(&row, Some(&message.raw)) {
                     log::warn!("could not store a history message: {error}");
                 }
+                if matches!(row.content, Content::Poll { .. }) {
+                    let _ = self.archive.mark_poll_history(&id, &row.id);
+                    self.poll_history.finish(&id, &row.id);
+                    self.emit_message(&id, &row.id);
+                }
+            }
+            for update in chat.poll_updates {
+                let sender = if update.from_me {
+                    self.me()
+                } else {
+                    update.sender.unwrap_or_else(|| chat.id.clone())
+                };
+                self.ingest_poll_vote(
+                    &id,
+                    &update.id,
+                    &sender,
+                    update.from_me,
+                    update.timestamp,
+                    &update.update,
+                );
             }
             for revoked in chat.revoked {
                 let _ = self
@@ -1931,6 +2012,8 @@ impl Worker {
             }
             filed.push((id, count, chat.more_on_phone));
         }
+        self.pump_poll_votes();
+        self.pump_poll_history();
         for (id, _, _) in &filed {
             self.emit_chat(id);
         }
@@ -2025,6 +2108,36 @@ impl Worker {
 
     async fn handle_command(&mut self, command: Command) {
         match command {
+            Command::RefreshPoll { chat, message } => self.refresh_poll(chat, message),
+            Command::PollHistoryFailed {
+                chat,
+                message,
+                requested,
+            } => {
+                self.poll_history
+                    .fail(&chat, &message, requested, Instant::now());
+                self.emit_message(&chat, &message);
+                self.pump_poll_history();
+            }
+            Command::CreatePoll { chat, draft } => self.create_poll(chat, draft),
+            Command::PollCreated {
+                chat,
+                draft,
+                result,
+            } => self.poll_created(chat, draft, result),
+            Command::VotePoll {
+                chat,
+                message,
+                choices,
+            } => self.vote_poll(chat, message, choices),
+            Command::PollVoted {
+                chat,
+                message,
+                choices,
+                at,
+                result,
+            } => self.poll_voted(chat, message, choices, at, result),
+            Command::PollDecoded { vote, choices } => self.poll_decoded(vote, choices),
             Command::SendText {
                 chat,
                 text,
@@ -2695,7 +2808,7 @@ impl Worker {
         };
         if matches!(
             source.content,
-            Content::Revoked | Content::Unsupported { .. }
+            Content::Revoked | Content::Unsupported { .. } | Content::Poll { .. }
         ) {
             self.emit(Event::Error("This message cannot be forwarded".to_owned()));
             return;
@@ -2834,6 +2947,7 @@ impl Worker {
 
     /// Refreshes stored quote ids and names with current mappings.
     fn polish(&self, message: &mut Message) {
+        self.polish_poll(message);
         if let Some(quoted) = message.quoted.as_mut() {
             let sender = self.canonical_str(&quoted.sender);
             if sender != quoted.sender || quoted.sender_name.is_none() {
@@ -4275,10 +4389,14 @@ fn classify(base: &wa::Message) -> Option<Content> {
     {
         return Some(Content::Poll {
             question: non_empty(&poll.name).unwrap_or_else(|| "Poll".to_owned()),
+            state: crate::model::PollState {
+                selectable: poll.selectable_options_count.unwrap_or(0) as usize,
+                ..Default::default()
+            },
             options: poll
                 .options
                 .iter()
-                .filter_map(|option| non_empty(&option.option_name))
+                .map(|option| option.option_name.clone().unwrap_or_default())
                 .collect(),
         });
     }
@@ -4854,6 +4972,7 @@ fn parse_history(compressed: &[u8]) -> Result<ParsedHistory, String> {
 fn parse_conversation(conversation: wa::Conversation) -> ParsedChat {
     let mut messages = Vec::new();
     let mut revoked = Vec::new();
+    let mut poll_updates = Vec::new();
     let mut newest = 0;
     for entry in &conversation.messages {
         let Some(info) = entry.message.as_option() else {
@@ -4883,15 +5002,25 @@ fn parse_conversation(conversation: wa::Conversation) -> ParsedChat {
         if base.reaction_message.is_set() {
             continue;
         }
-        let Some(content) = classify(base) else {
-            continue;
-        };
         let sender = info
             .participant
             .clone()
             .or_else(|| key.participant.clone())
             .filter(|sender| !sender.is_empty())
             .or_else(|| key.remote_jid.clone());
+        if let Some(update) = base.poll_update_message.as_option() {
+            poll_updates.push(HistoryPollUpdate {
+                id,
+                sender,
+                from_me,
+                timestamp,
+                update: update.clone(),
+            });
+            continue;
+        }
+        let Some(content) = classify(base) else {
+            continue;
+        };
         use wa::web_message_info::Status;
         let mut status = if from_me {
             match info.status {
@@ -4967,6 +5096,8 @@ fn parse_conversation(conversation: wa::Conversation) -> ParsedChat {
             forwarded: forwarded_of(base),
             thumbnail: thumbnail_of(base),
             raw: message.encode_to_vec(),
+            poll_secret: info.message_secret.clone(),
+            poll_votes: info.poll_updates.clone(),
         });
     }
     let last_activity = conversation
@@ -5002,6 +5133,7 @@ fn parse_conversation(conversation: wa::Conversation) -> ParsedChat {
         more_on_phone,
         messages,
         revoked,
+        poll_updates,
     }
 }
 
@@ -5350,7 +5482,7 @@ mod receipt_tests {
         assert_eq!(worker.group_info_tries.get("busy@g.us"), Some(&1));
     }
 
-    fn worker() -> (
+    pub(super) fn worker() -> (
         Worker,
         std::sync::mpsc::Receiver<Event>,
         mpsc::UnboundedReceiver<Command>,
@@ -5392,6 +5524,9 @@ mod receipt_tests {
             sticker_fetches: HashSet::new(),
             sticker_downloads: HashSet::new(),
             read_sync: ReadSync::default(),
+            poll_decrypting: 0,
+            poll_history: Default::default(),
+            poll_sending: HashSet::new(),
         };
         (worker, events_rx, inbox, wa_events)
     }

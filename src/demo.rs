@@ -747,6 +747,15 @@ pub fn populate(app: &mut App) {
             group_base + 180,
             Content::Poll {
                 question: "Pizza after the talks?".into(),
+                state: crate::model::PollState {
+                    selectable: 1,
+                    counts: vec![3, 2, 0],
+                    selected: vec![0],
+                    voters: 5,
+                    can_vote: true,
+                    history_complete: true,
+                    ..Default::default()
+                },
                 options: vec!["Yes".into(), "Only if it's Neapolitan".into(), "No".into()],
             },
         ),
@@ -870,6 +879,19 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                             .into(),
                     ));
                 }
+            }
+            "poll" => {
+                app.open_chat = Some(SAMPLES[1].id.into());
+                app.scroll_to_bottom = true;
+                app.typing.clear();
+            }
+            "poll-create" => {
+                app.dialog = app.open_chat.clone().map(Dialog::CreatePoll);
+                app.poll_draft = crate::model::PollDraft {
+                    question: "Pizza after the talks? 🍕".into(),
+                    options: vec!["Yes".into(), "Only if it’s Neapolitan".into(), "No".into()],
+                    multiple: false,
+                };
             }
             "shortcuts" => app.dialog = Some(Dialog::Shortcuts),
             "about" => app.dialog = Some(Dialog::About),
@@ -1200,6 +1222,8 @@ mod tests {
             "update-failed",
             "update-managed",
             "themes",
+            "poll",
+            "poll-create",
             "theme=Catppuccin.json",
             "theme=Catppuccin Latte.json",
             "theme=Nord.json",

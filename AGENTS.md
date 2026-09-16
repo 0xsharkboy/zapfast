@@ -46,6 +46,16 @@ protocol. These notes are for coding agents and new contributors.
   a disposable archive. Tests use fixtures and mock credentials only.
 - `src/model.rs` holds the app's own types. Views never touch a protobuf;
   the worker translates in `classify()` and `parse_conversation()`.
+- Poll creation, voting, and decryption use whatsapp-rust's `Client::polls()`.
+  `backend/worker/polls.rs` retains the original creator identity and key in the
+  encrypted archive; `archive/polls.rs` keeps each voter's latest timestamp and
+  message id, including encrypted updates whose parent has not arrived yet.
+  History replay must not undo a newer vote or withdrawal. Decryption runs in
+  batches of eight, with failures retried after reconnecting. The interface only
+  receives option counts and its own selection, never keys or protobufs. Visible
+  polls request phone history automatically, anchored after the creation message
+  so the response includes its vote snapshot. `poll_history.rs` serializes these
+  requests and retries from 30 seconds to 15 minutes without an interface timer.
 - Chat ids are canonical strings: a chat behind a privacy id (`@lid`) is
   filed under its phone number once the mapping is known. Use
   `Worker::canonical` for anything that arrives as a `Jid`.

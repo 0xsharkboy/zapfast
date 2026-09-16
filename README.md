@@ -68,6 +68,17 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
   Windows drive paths and filenames with spaces or non-ASCII characters.
   If an attachment has expired, ZapFast asks your
   phone to upload it again.
+- **Polls.** Use the chart button beside the paperclip to create a poll with
+  2–12 answers. Turn off **Allow multiple answers** for a single-choice poll.
+  Click an answer in a poll to vote; click a selected answer again to remove
+  it. Results and your selection are retained in the encrypted archive, including
+  votes received through phone history. Visible polls automatically request earlier
+  votes from your phone. If it is offline, results are labelled incomplete and the
+  request retries with backoff; no refresh button or relinking is needed.
+  Voting needs the original poll's key;
+  if that key is missing, the message explains that voting is available on your
+  phone. Creating polls in disappearing-message chats is not yet supported by
+  the protocol library's poll API, so ZapFast blocks it instead of ignoring the timer.
 - **Emoji, GIF, and sticker picker.** Search emoji and GIFs, use recent emoji
   and stickers, and save stickers with a right-click. Emoji autocomplete and
   picker search select their first match; use the arrow keys and Enter to

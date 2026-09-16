@@ -811,6 +811,9 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                 {
                     app.actions.push(Action::Attach);
                 }
+                if app.editing.is_none() && theme::icon_button(ui, Icon::ChartBar, 20.0, palette.secondary, palette.text, "Create poll").clicked() {
+                    app.actions.push(Action::ShowDialog(Dialog::CreatePoll(chat.id.clone())));
+                }
                 if app.editing.is_none() {
                     let smile = theme::icon_button(
                         ui,
@@ -1128,6 +1131,8 @@ struct View<'a> {
     chat: &'a Chat,
     me: Option<&'a str>,
     auto_download: bool,
+    connected: bool,
+    poll_voting: &'a HashSet<(ChatId, String)>,
     /// Show avatars for all incoming messages, not only groups.
     pictures: bool,
     anchor: Option<&'a str>,
@@ -1168,6 +1173,8 @@ fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
         chat,
         me: app.me.as_deref(),
         auto_download: app.settings.auto_download,
+        connected: app.link.is_connected(),
+        poll_voting: &app.poll_voting,
         pictures: app.settings.show_sender_pictures,
         anchor: if conversation.loading_older || conversation.fetching_phone {
             None
@@ -2206,7 +2213,7 @@ fn context_menu(ui: &mut egui::Ui, view: &View<'_>, message: &Message, actions: 
     }
     if !matches!(
         message.content,
-        Content::Revoked | Content::Unsupported { .. }
+        Content::Revoked | Content::Unsupported { .. } | Content::Poll { .. }
     ) && widgets::menu_item(ui, &palette, Some(Icon::Forward), "Forward")
     {
         actions.push(Action::ShowDialog(Dialog::Forward {
@@ -2526,19 +2533,17 @@ fn content(
             });
             None
         }
-        Content::Poll { question, options } => {
-            // Keep poll content left-to-right within the settled width.
-            ui.allocate_ui_with_layout(vec2(width, 0.0), Layout::top_down(Align::Min), |ui| {
-                ui.set_width(width);
-                widgets::rich_text(ui, question, theme::semibold(14.0), palette.text);
-                for option in options {
-                    ui.horizontal(|ui| {
-                        theme::icon(ui, Icon::CircleCheck, 14.0, palette.dim);
-                        widgets::rich_text(ui, option, theme::regular(13.5), palette.text);
-                    });
-                }
-                theme::text(ui, "Vote on your phone", theme::regular(11.5), palette.dim);
-            });
+        Content::Poll { .. } => {
+            super::polls::ballot(
+                ui,
+                &palette,
+                message,
+                width,
+                view.connected,
+                view.poll_voting
+                    .contains(&(message.chat.clone(), message.id.clone())),
+                actions,
+            );
             None
         }
         Content::Revoked => {

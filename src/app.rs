@@ -211,6 +211,9 @@ pub struct App {
     pub dialog: Option<Dialog>,
     /// Chat filter in the forwarding destination dialog.
     pub forward_search: String,
+    pub poll_draft: crate::model::PollDraft,
+    pub poll_creating: bool,
+    pub poll_voting: HashSet<(ChatId, String)>,
     /// Contact-name editor buffers.
     pub contact_edit: Option<(String, String)>,
     /// New-contact buffers and lookup state.
@@ -405,6 +408,9 @@ impl App {
             page: Page::Chats,
             dialog: None,
             forward_search: String::new(),
+            poll_draft: Default::default(),
+            poll_creating: false,
+            poll_voting: HashSet::new(),
             contact_edit: None,
             new_contact_phone: String::new(),
             new_contact_name: String::new(),
@@ -1021,6 +1027,25 @@ impl App {
                         self.stage_files(paths);
                     }
                 }
+                Event::PollCreated { chat, error } => {
+                    self.poll_creating = false;
+                    if let Some(error) = error {
+                        self.toast_error(error);
+                    } else if self.dialog == Some(Dialog::CreatePoll(chat)) {
+                        self.dialog = None;
+                        self.poll_draft = Default::default();
+                    }
+                }
+                Event::PollVoted {
+                    chat,
+                    message,
+                    error,
+                } => {
+                    self.poll_voting.remove(&(chat, message));
+                    if let Some(error) = error {
+                        self.toast_error(error);
+                    }
+                }
                 Event::MessageUpdated(message) => {
                     let message = *message;
                     if let Some(conversation) = self.conversations.get_mut(&message.chat)
@@ -1181,6 +1206,14 @@ impl App {
     fn handle_link(&mut self, status: LinkStatus) {
         match &status {
             LinkStatus::Connected => {
+                for conversation in self.conversations.values_mut() {
+                    for message in &mut conversation.messages {
+                        if let Content::Poll { state, .. } = &mut message.content {
+                            state.refresh_needed = true;
+                            state.refreshing = false;
+                        }
+                    }
+                }
                 if matches!(self.link, LinkStatus::Disconnected { .. }) {
                     self.toast("Back online");
                 }
@@ -1193,6 +1226,9 @@ impl App {
                 }
             }
             LinkStatus::LoggedOut => {
+                self.poll_voting.clear();
+                self.poll_creating = false;
+                self.poll_draft = Default::default();
                 self.notifications.clear_all();
                 self.chats.clear();
                 self.conversations.clear();
@@ -1809,6 +1845,41 @@ impl App {
                 self.send_text(chat, text, quoting);
                 self.reply_to = None;
             }
+            Action::RefreshPoll { chat, message } => {
+                if let Some(row) = self
+                    .conversations
+                    .get_mut(&chat)
+                    .and_then(|chat| chat.message_mut(&message))
+                    && let Content::Poll { state, .. } = &mut row.content
+                {
+                    state.refreshing = true;
+                }
+                self.backend.send(Command::RefreshPoll { chat, message });
+            }
+            Action::CreatePoll { chat, draft } => {
+                if !self.poll_creating {
+                    match draft.validated() {
+                        Ok(draft) => {
+                            self.poll_creating = true;
+                            self.backend.send(Command::CreatePoll { chat, draft });
+                        }
+                        Err(error) => self.toast_error(error),
+                    }
+                }
+            }
+            Action::VotePoll {
+                chat,
+                message,
+                choices,
+            } => {
+                if self.poll_voting.insert((chat.clone(), message.clone())) {
+                    self.backend.send(Command::VotePoll {
+                        chat,
+                        message,
+                        choices,
+                    });
+                }
+            }
             Action::Composing { chat, composing } => {
                 if composing {
                     self.note_keystroke();
@@ -2120,6 +2191,9 @@ impl App {
             Action::ShowDialog(dialog) => {
                 self.emoji_start = None;
                 self.mention_start = None;
+                if matches!(&dialog, Dialog::CreatePoll(_)) && !self.poll_creating {
+                    self.poll_draft = Default::default();
+                }
                 if matches!(&dialog, Dialog::Forward { .. }) {
                     self.forward_search.clear();
                 }
@@ -2729,6 +2803,57 @@ mod tests {
     fn app() -> App {
         let root = std::env::temp_dir().join(format!("zapfast-app-{}", std::process::id()));
         App::headless(AppDirs::under(&root), Settings::default()).0
+    }
+
+    #[test]
+    fn failed_poll_requests_keep_the_draft_and_clear_pending_controls() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, events) =
+            App::headless(AppDirs::under(directory.path()), Settings::default());
+        let ctx = egui::Context::default();
+        let draft = crate::model::PollDraft {
+            question: "Lunch?".into(),
+            options: vec!["Pizza".into(), "Pasta".into()],
+            multiple: false,
+        };
+        app.dialog = Some(Dialog::CreatePoll("chat".into()));
+        app.poll_draft = draft.clone();
+        app.apply(
+            Action::CreatePoll {
+                chat: "chat".into(),
+                draft: draft.clone(),
+            },
+            &ctx,
+        );
+        assert!(app.poll_creating);
+        events
+            .send(Event::PollCreated {
+                chat: "chat".into(),
+                error: Some("Could not send".into()),
+            })
+            .unwrap();
+        app.background_frame(&ctx);
+        assert!(!app.poll_creating);
+        assert_eq!(app.poll_draft, draft);
+        assert!(app.dialog.is_some());
+        app.apply(
+            Action::VotePoll {
+                chat: "chat".into(),
+                message: "poll".into(),
+                choices: vec![0],
+            },
+            &ctx,
+        );
+        assert_eq!(app.poll_voting.len(), 1);
+        events
+            .send(Event::PollVoted {
+                chat: "chat".into(),
+                message: "poll".into(),
+                error: Some("Could not vote".into()),
+            })
+            .unwrap();
+        app.background_frame(&ctx);
+        assert!(app.poll_voting.is_empty());
     }
 
     #[test]

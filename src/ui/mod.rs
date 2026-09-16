@@ -6,6 +6,7 @@ pub mod dialogs;
 pub mod keys;
 pub mod login;
 pub mod picker;
+pub mod polls;
 pub mod settings;
 pub mod update;
 pub mod widgets;

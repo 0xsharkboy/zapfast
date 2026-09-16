@@ -10,7 +10,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::model::{Chat, ChatKind, Contact, Content, Delivery, LastMessage, Message};
 
 mod encryption;
+mod polls;
 mod receipts;
+pub use polls::PollVote;
 
 /// Recent phone sticker metadata, last-used time, and optional local file.
 #[derive(Clone, Debug)]
@@ -223,6 +225,7 @@ impl Archive {
     fn prepare(connection: Connection) -> Result<Self> {
         connection.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
         connection.execute_batch(SCHEMA)?;
+        connection.execute_batch(polls::SCHEMA)?;
         for (table, column, definition) in MIGRATIONS {
             let exists = connection
                 .prepare(&format!("PRAGMA table_info({table})"))?
@@ -1132,17 +1135,17 @@ impl Archive {
     /// Clears all archived data during unlinking.
     pub fn clear(&self) -> Result<()> {
         self.connection.execute_batch(
-            "DELETE FROM group_receipts; DELETE FROM messages; DELETE FROM chats; DELETE FROM contacts; DELETE FROM meta; DELETE FROM lids;",
+            "DELETE FROM poll_history; DELETE FROM poll_votes; DELETE FROM polls; DELETE FROM group_receipts; DELETE FROM messages; DELETE FROM chats; DELETE FROM contacts; DELETE FROM meta; DELETE FROM lids;",
         )
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::model::Content;
 
-    pub(super) fn message(chat: &str, id: &str, timestamp: i64, from_me: bool) -> Message {
+    pub(crate) fn message(chat: &str, id: &str, timestamp: i64, from_me: bool) -> Message {
         Message {
             id: id.into(),
             chat: chat.into(),

@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 
-use crate::model::{Chat, ChatId, Contact, Gif, GifError, Message, StickerPack};
+use crate::model::{Chat, ChatId, Contact, Gif, GifError, Message, PollDraft, StickerPack};
 use crate::paths::AppDirs;
 
 // Re-exported so the picker can detect pasted Signal pack links.
@@ -48,7 +48,49 @@ impl LinkStatus {
 pub type PageKey = (i64, String);
 
 #[derive(Clone, Debug)]
+pub struct CreatedPoll {
+    pub id: String,
+    pub secret: Vec<u8>,
+    pub creator: String,
+    pub recipients: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
 pub enum Command {
+    RefreshPoll {
+        chat: ChatId,
+        message: String,
+    },
+    PollHistoryFailed {
+        chat: ChatId,
+        message: String,
+        requested: std::time::Instant,
+    },
+    CreatePoll {
+        chat: ChatId,
+        draft: PollDraft,
+    },
+    PollCreated {
+        chat: ChatId,
+        draft: PollDraft,
+        result: Result<CreatedPoll, String>,
+    },
+    VotePoll {
+        chat: ChatId,
+        message: String,
+        choices: Vec<usize>,
+    },
+    PollVoted {
+        chat: ChatId,
+        message: String,
+        choices: Vec<usize>,
+        at: i64,
+        result: Result<String, String>,
+    },
+    PollDecoded {
+        vote: crate::archive::PollVote,
+        choices: Option<Vec<usize>>,
+    },
     SendText {
         chat: ChatId,
         text: String,
@@ -334,6 +376,15 @@ pub enum Command {
 
 #[derive(Debug)]
 pub enum Event {
+    PollCreated {
+        chat: ChatId,
+        error: Option<String>,
+    },
+    PollVoted {
+        chat: ChatId,
+        message: String,
+        error: Option<String>,
+    },
     Link(LinkStatus),
     /// Linked account identity.
     Me {

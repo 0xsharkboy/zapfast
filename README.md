@@ -28,6 +28,7 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
   Pinned chats stay in pin order (most recently pinned first), regardless of
   new messages. Chat and contact name searches ignore accents, so `Angel`
   finds `Ángel`.
+  Typing indicators show other participants, excluding your own linked devices.
 - **Read state across devices.** Reading a chat syncs its unread badge with
   your phone and other linked devices, including when read receipts are off.
   Replies from another device clear preceding unread messages. The read-receipt
@@ -69,6 +70,8 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
   timer, including replies, attachments, edits, and forwards. Forwarded copies
   use the destination chat's timer. Received messages remain in the local archive
   after they expire on the phone.
+  A clock badge on chat avatars shows enabled timers and follows changes from
+  the phone. Changing the default timer for new chats leaves existing chats alone.
 - **View attachments.** ZapFast downloads files up to 64 MB automatically or
   on click. Photos, stickers, GIFs, voice messages, audio, locations, contacts,
   polls, and link previews appear in the chat. Videos and documents open in

@@ -6,6 +6,9 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+#[cfg(target_os = "windows")]
+mod windows;
+
 #[cfg(any(target_os = "macos", test))]
 const MACOS_APPLICATION_ID: &str = "me.paolino.fastsapp";
 
@@ -154,7 +157,26 @@ fn deliver(
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+fn deliver(
+    title: &str,
+    body: &str,
+    picture: Option<&std::path::Path>,
+    _chat: String,
+    _opened: Arc<Mutex<Vec<String>>>,
+    _wake: impl Fn() + Send + 'static,
+    mut cancelled: tokio::sync::oneshot::Receiver<()>,
+) {
+    if matches!(
+        cancelled.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ) && let Err(error) = windows::show(title, body, picture)
+    {
+        log::debug!("no Windows notification: {error}");
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 fn deliver(
     title: &str,
     body: &str,

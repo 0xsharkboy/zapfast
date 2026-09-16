@@ -7134,6 +7134,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "skrifa",
+ "tauri-winrt-notification",
  "tempfile",
  "tokio",
  "tray-icon",

@@ -115,7 +115,10 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
   system tray. Reopen it from the tray or by launching it again. Quit from the
   tray or with `Ctrl+Q`, or disable this behavior in Settings.
 - **Desktop notifications.** Get notifications with the chat picture when you
-  are away from the open chat. Muted chats do not notify you. On Linux,
+  are away from the open chat. Muted chats do not notify you. Windows notifications
+  identify ZapFast as the sender and show chat pictures as small circular icons;
+  installed and portable builds register this identity in the current user's registry.
+  On Linux,
   clicking a notification opens the chat, and reading the chat here or on another
   device dismisses its outstanding notifications. On macOS, notifications use
   the installed ZapFast application's identity without an application chooser;

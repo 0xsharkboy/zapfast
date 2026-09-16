@@ -41,6 +41,8 @@ pub struct Chat {
     pub unread: u32,
     pub archived: bool,
     pub pinned: bool,
+    /// Pin time in Unix milliseconds; zero for older archives with no ordering.
+    pub pinned_at: i64,
     /// Mute end as Unix seconds; `Some(0)` means indefinite.
     pub muted_until: Option<i64>,
     /// Latest message shown in the chat list.
@@ -72,6 +74,7 @@ impl Chat {
             unread: 0,
             archived: false,
             pinned: false,
+            pinned_at: 0,
             muted_until: None,
             last: None,
             participants: Vec::new(),

@@ -23,7 +23,7 @@ jobs:
       - name: Generate offline Cargo sources
         run: |
           python3 -m venv /tmp/flatpak-generator
-          /tmp/flatpak-generator/bin/pip install aiohttp toml PyYAML
+          /tmp/flatpak-generator/bin/pip install aiohttp tomlkit PyYAML
           PATH="/tmp/flatpak-generator/bin:$PATH" python3 packaging/flatpak/test-packaging.py
           PATH="/tmp/flatpak-generator/bin:$PATH" packaging/flatpak/flathub.sh HEAD /tmp/zapfast-flathub
           cp /tmp/zapfast-flathub/cargo-sources.json packaging/flatpak/

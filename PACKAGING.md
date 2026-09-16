@@ -110,7 +110,7 @@ GPU, audio, network, keyring and tray access; attachments chosen by the user use
 portals. No home-directory permission is granted. `--persist=.local/state` keeps
 the archive and session on Flatpak versions without `XDG_STATE_HOME`.
 
-Generate a pinned Flathub checkout (Python needs `aiohttp`, `toml` and `PyYAML`):
+Generate a pinned Flathub checkout (Python needs `aiohttp`, `tomlkit` and `PyYAML`):
 
 ```sh
 packaging/flatpak/flathub.sh vX.Y.Z /path/to/flathub-checkout

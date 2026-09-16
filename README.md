@@ -117,7 +117,9 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
 - **Desktop notifications.** Get notifications with the chat picture when you
   are away from the open chat. Muted chats do not notify you. On Linux,
   clicking a notification opens the chat, and reading the chat here or on another
-  device dismisses its outstanding notifications.
+  device dismisses its outstanding notifications. On macOS, notifications use
+  the installed ZapFast application's identity without an application chooser;
+  unregistered development builds skip notifications if that identity is unavailable.
 - **Update notices.** ZapFast checks GitHub once a day and shows a download
   link when a newer release is available. You can turn this off in Settings.
 - **Themes.** Light, dark, follow the system, or a local JSON palette. Native

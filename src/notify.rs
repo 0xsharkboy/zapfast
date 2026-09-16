@@ -6,6 +6,25 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+#[cfg(any(target_os = "macos", test))]
+const MACOS_APPLICATION_ID: &str = "me.paolino.fastsapp";
+
+#[cfg(target_os = "macos")]
+fn macos_application_ready() -> bool {
+    static READY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *READY.get_or_init(|| {
+        // The library's implicit default looks up an app named "use_default"
+        // through AppleScript, which opens macOS's application chooser.
+        match notify_rust::set_application(MACOS_APPLICATION_ID) {
+            Ok(()) => true,
+            Err(error) => {
+                log::debug!("could not initialize notification application: {error}");
+                false
+            }
+        }
+    })
+}
+
 /// Cancellation is registered before delivery starts, so reading a chat while
 /// its notification is still being delivered cannot leave a stale notification.
 #[derive(Default)]
@@ -145,6 +164,11 @@ fn deliver(
     _wake: impl Fn() + Send + 'static,
     mut cancelled: tokio::sync::oneshot::Receiver<()>,
 ) {
+    // Never fall back to application discovery, including for unbundled builds.
+    #[cfg(target_os = "macos")]
+    if !macos_application_ready() {
+        return;
+    }
     if !matches!(
         cancelled.try_recv(),
         Err(tokio::sync::oneshot::error::TryRecvError::Empty)
@@ -165,6 +189,14 @@ fn deliver(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn macos_notification_identity_matches_the_packaged_application() {
+        let plist = include_str!("../packaging/macos/Info.plist");
+        assert!(plist.contains(&format!(
+            "<key>CFBundleIdentifier</key><string>{MACOS_APPLICATION_ID}</string>"
+        )));
+    }
 
     #[test]
     fn reading_cancels_delivered_and_pending_notifications_for_only_that_chat() {

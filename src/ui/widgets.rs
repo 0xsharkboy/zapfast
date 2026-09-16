@@ -169,7 +169,7 @@ pub fn paint_disappearing_badge(ui: &Ui, palette: &Palette, avatar: Rect) {
     );
     ui.painter()
         .circle_filled(rect.center(), size * 0.58, palette.surface);
-    theme::paint_icon(ui, Icon::DisappearingMessages, rect, size, palette.accent);
+    theme::paint_icon(ui, Icon::Timer, rect, size, palette.accent);
 }
 
 /// Outgoing-message status ticks.

@@ -9,6 +9,7 @@ use egui::{Align, Layout, Sense, Stroke, pos2, vec2};
 pub fn create(app: &mut App, ui: &mut egui::Ui, chat: &str) {
     let palette = app.palette;
     ui.horizontal(|ui| {
+        theme::icon(ui, Icon::ListChecks, 20.0, palette.accent);
         theme::text(ui, "Create poll", theme::bold(18.0), palette.text);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if theme::icon_button(ui, Icon::X, 16.0, palette.secondary, palette.text, "Close")

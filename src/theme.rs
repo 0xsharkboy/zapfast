@@ -5,7 +5,11 @@
 
 use egui::{Color32, CornerRadius, Response, Sense, Stroke, Vec2};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+pub mod custom;
+#[cfg(target_os = "linux")]
+mod omarchy;
+
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Palette {
     pub dark: bool,
     pub window: Color32,
@@ -672,6 +676,9 @@ pub fn spinner(ui: &mut egui::Ui, size: f32, color: Color32) -> Response {
 
 /// Paints a centered spinner without allocating space.
 pub fn paint_spinner(ui: &egui::Ui, rect: egui::Rect, size: f32, color: Color32) {
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
     ui.ctx()
         .request_repaint_after(std::time::Duration::from_millis(33));
     let radius = size / 2.0 - 2.0;

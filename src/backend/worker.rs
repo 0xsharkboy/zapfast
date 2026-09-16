@@ -147,20 +147,28 @@ pub async fn run(
     mut inbox: mpsc::UnboundedReceiver<Command>,
     waker: Waker,
 ) {
-    let archive = match Archive::open(&dirs.archive_db()) {
-        Ok(archive) => archive,
-        Err(error) => {
-            log::error!("could not open the message archive, keeping it in memory: {error}");
-            let _ = events.send(Event::Error(format!(
-                "Could not open the message archive. Messages will not be saved: {error}"
-            )));
-            match Archive::in_memory() {
-                Ok(archive) => archive,
-                Err(error) => {
-                    let _ = events.send(Event::Link(LinkStatus::Failed(format!(
-                        "Could not start SQLite: {error}"
-                    ))));
-                    return;
+    let archive = loop {
+        let path = dirs.archive_db();
+        let opened = tokio::task::spawn_blocking(move || Archive::open(&path)).await;
+        match opened {
+            Ok(Ok(archive)) => break archive,
+            result => {
+                let error = match result {
+                    Ok(Err(error)) => format!("{error:#}"),
+                    Err(_) => "Archive unlock worker failed".to_owned(),
+                    Ok(Ok(_)) => unreachable!(),
+                };
+                log::error!("could not unlock the message archive: {error}");
+                let _ = events.send(Event::Link(LinkStatus::Failed(error)));
+                waker.wake();
+                // Do not connect with a disposable archive: history is replayed
+                // only once and would be lost if the keyring were locked.
+                loop {
+                    match inbox.recv().await {
+                        Some(Command::Reconnect) => break,
+                        Some(Command::Shutdown) | None => return,
+                        _ => {}
+                    }
                 }
             }
         }
@@ -2308,6 +2316,43 @@ impl Worker {
             }
             Command::ReceiptsPrivacy { disabled } => {
                 self.emit(Event::ReceiptsPrivacy { disabled });
+            }
+            Command::InspectUpdate => {
+                let events = self.events.clone();
+                let waker = self.waker.clone();
+                tokio::task::spawn_blocking(move || {
+                    let result =
+                        crate::updates::install::detect().map_err(|error| format!("{error:#}"));
+                    let _ = events.send(Event::UpdateSupport(result));
+                    waker.wake();
+                });
+            }
+            Command::DownloadUpdate { release, source } => {
+                let events = self.events.clone();
+                let waker = self.waker.clone();
+                tokio::task::spawn_blocking(move || {
+                    let result = crate::updates::download(&release, &source, |received, total| {
+                        let _ = events.send(Event::UpdateProgress { received, total });
+                        waker.wake();
+                    })
+                    .map(Box::new)
+                    .map_err(|error| format!("{error:#}"));
+                    let _ = events.send(Event::UpdateDownloaded(result));
+                    waker.wake();
+                });
+            }
+            Command::InstallUpdate {
+                prepared,
+                arguments,
+            } => {
+                let events = self.events.clone();
+                let waker = self.waker.clone();
+                tokio::task::spawn_blocking(move || {
+                    let result = crate::updates::install::handoff(&prepared, arguments)
+                        .map_err(|error| format!("{error:#}"));
+                    let _ = events.send(Event::UpdateInstalling(result));
+                    waker.wake();
+                });
             }
             Command::CheckForUpdates => {
                 let events = self.events.clone();

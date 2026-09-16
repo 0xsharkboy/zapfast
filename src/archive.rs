@@ -9,6 +9,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::model::{Chat, ChatKind, Contact, Content, Delivery, LastMessage, Message};
 
+mod encryption;
 mod receipts;
 
 /// Recent phone sticker metadata, last-used time, and optional local file.
@@ -204,12 +205,15 @@ fn kind_from_name(name: &str) -> ChatKind {
 }
 
 impl Archive {
-    pub fn open(path: &Path) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let connection = Connection::open(path)?;
-        Self::prepare(connection)
+    /// Unlocks the on-disk archive with its OS keyring key, migrating plaintext
+    /// archives before their first encrypted use. Never falls back to plaintext.
+    pub fn open(path: &Path) -> anyhow::Result<Self> {
+        let key = encryption::key_for(path)?;
+        Self::open_with_key(path, &key)
+    }
+
+    fn open_with_key(path: &Path, key: &[u8; 32]) -> anyhow::Result<Self> {
+        Ok(Self::prepare(encryption::open(path, key)?)?)
     }
 
     pub fn in_memory() -> Result<Self> {
@@ -1594,7 +1598,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let chat = "1@s.whatsapp.net";
         {
-            let archive = Archive::open(&path).unwrap();
+            let archive = Archive::open_with_key(&path, &[7; 32]).unwrap();
             archive.ensure_chat(chat, "A").unwrap();
             archive
                 .insert_message(&message(chat, "a", 100, false), None)
@@ -1604,7 +1608,7 @@ mod tests {
             archive.queue_read_sync(chat).unwrap();
         }
         {
-            let archive = Archive::open(&path).unwrap();
+            let archive = Archive::open_with_key(&path, &[7; 32]).unwrap();
             assert_eq!(archive.read_through(chat).unwrap(), Some(100));
             assert_eq!(archive.pending_reads().unwrap(), vec![(chat.into(), 100)]);
             archive

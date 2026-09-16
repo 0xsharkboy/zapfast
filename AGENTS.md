@@ -39,12 +39,24 @@ protocol. These notes are for coding agents and new contributors.
 - `src/archive.rs` is the SQLite store of chats, messages, contacts, and
   privacy-id mappings. WhatsApp replays history once, at link time, so the
   archive is the only copy. It keeps each message's raw protobuf because
-  the keys to fetch an attachment live in it.
+  the keys to fetch an attachment live in it. `src/archive/encryption.rs` opens
+  the archive with SQLCipher and a random key stored in the OS keyring. Plaintext
+  migration checkpoints the old WAL and verifies an encrypted staging file before
+  atomic replacement. A locked or missing key stops linking; never fall back to
+  a disposable archive. Tests use fixtures and mock credentials only.
 - `src/model.rs` holds the app's own types. Views never touch a protobuf;
   the worker translates in `classify()` and `parse_conversation()`.
 - Chat ids are canonical strings: a chat behind a privacy id (`@lid`) is
   filed under its phone number once the mapping is known. Use
   `Worker::canonical` for anything that arrives as a `Jid`.
+- `src/updates/` downloads verified GitHub releases and hands installation to a
+  helper after an explicit restart action. Keep package-manager detection, asset
+  checksums, startup acknowledgement and rollback intact. Portable releases carry
+  `packaging/zapfast-portable.txt`; the Windows installer has its own marker.
+- `src/theme/custom.rs` scans local JSON palettes off the UI thread, caching the
+  last usable choice in settings. Native Linux packages ship optional Omarchy
+  assets; setup preserves existing per-user hooks and templates. `reload-themes`
+  uses the single-instance channel without opening a window.
 - `src/theme.rs` owns colours, fonts, and icons; `src/ui/widgets.rs` the
   shared controls. New icons go in `assets/icons/` as 24px Lucide-style SVGs
   and in the `icons!` table.

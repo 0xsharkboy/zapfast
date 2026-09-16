@@ -16,7 +16,7 @@ use crate::model::{
 use crate::paths::AppDirs;
 use crate::settings::{Settings, ThemeChoice};
 use crate::single_instance::{ControlCommand, Guard};
-use crate::theme::Palette;
+use crate::theme::{self, Palette};
 use crate::tray::{TrayCommand, TrayService};
 
 /// Initial and incremental message-page size.
@@ -111,6 +111,7 @@ pub struct App {
     last_settings_save: Instant,
     pub backend: Backend,
     pub palette: Palette,
+    pub custom_themes: theme::custom::Catalog,
     applied_dark: Option<bool>,
     zoom_applied: bool,
 
@@ -226,6 +227,11 @@ pub struct App {
     /// A newer release than this build, once GitHub has said so.
     pub update: Option<crate::updates::Release>,
     last_update_check: Option<Instant>,
+    pub show_update: bool,
+    pub update_download: crate::updates::DownloadState,
+    pub update_support: Option<Result<crate::updates::install::Installation, String>>,
+    update_inspecting: bool,
+    pub update_arguments: Vec<String>,
     /// Whether to scroll the conversation to its newest message.
     pub scroll_to_bottom: bool,
     /// Whether the conversation was at the bottom last frame.
@@ -296,6 +302,9 @@ impl App {
     pub fn new(waker: &Waker, dirs: AppDirs, settings: Settings, options: AppOptions) -> Self {
         let backend = Backend::spawn(dirs.clone(), waker.clone());
         let mut app = Self::with_backend(dirs, settings, backend, waker.clone());
+        #[cfg(target_os = "linux")]
+        app.custom_themes.enable_packaged_omarchy();
+        app.load_custom_themes();
         if options.tray {
             let waker = waker.clone();
             app.tray = TrayService::spawn(move || waker.wake());
@@ -318,10 +327,12 @@ impl App {
     }
 
     fn with_backend(dirs: AppDirs, settings: Settings, backend: Backend, waker: Waker) -> Self {
-        let palette = match settings.theme {
-            ThemeChoice::Light => Palette::light(),
-            _ => Palette::dark(),
-        };
+        let palette = settings
+            .cached_palette()
+            .unwrap_or_else(|| match settings.theme {
+                ThemeChoice::Light => Palette::light(),
+                _ => Palette::dark(),
+            });
         let open_chat = settings.last_chat.clone();
         Self {
             dirs,
@@ -330,6 +341,7 @@ impl App {
             last_settings_save: Instant::now(),
             backend,
             palette,
+            custom_themes: theme::custom::Catalog::default(),
             applied_dark: None,
             zoom_applied: false,
             link: LinkStatus::Starting,
@@ -406,6 +418,11 @@ impl App {
             actions: Vec::new(),
             update: None,
             last_update_check: None,
+            show_update: false,
+            update_download: Default::default(),
+            update_support: None,
+            update_inspecting: false,
+            update_arguments: Vec::new(),
             scroll_to_bottom: true,
             at_bottom: true,
             scroll_anchor: None,
@@ -466,6 +483,7 @@ impl App {
         for command in commands {
             match command {
                 ControlCommand::Show => self.actions.push(Action::ShowWindow),
+                ControlCommand::ReloadThemes => self.actions.push(Action::ReloadThemes),
             }
         }
     }
@@ -1131,6 +1149,27 @@ impl App {
                     }
                     self.update = Some(notice);
                 }
+                Event::UpdateSupport(result) => {
+                    self.update_support = Some(result);
+                    self.update_inspecting = false;
+                    self.maybe_download_update();
+                }
+                Event::UpdateProgress { received, total } => {
+                    self.update_download =
+                        crate::updates::DownloadState::Downloading { received, total };
+                }
+                Event::UpdateDownloaded(result) => {
+                    self.update_download = match result {
+                        Ok(prepared) => crate::updates::DownloadState::Ready(prepared),
+                        Err(error) => crate::updates::DownloadState::Failed(error),
+                    };
+                }
+                Event::UpdateInstalling(result) => match result {
+                    Ok(()) => self.actions.push(Action::Quit),
+                    Err(error) => {
+                        self.update_download = crate::updates::DownloadState::Failed(error)
+                    }
+                },
                 Event::Error(message) => {
                     self.sticker_import_pending = false;
                     self.new_contact_pending = false;
@@ -1558,11 +1597,53 @@ impl App {
             self.last_update_check = Some(now);
             self.backend.send(Command::CheckForUpdates);
         }
+        self.maybe_download_update();
         if self.settings_dirty && self.last_settings_save.elapsed() > Duration::from_secs(2) {
             self.save_settings();
         }
         if !self.typing.is_empty() || self.composing {
             ctx.request_repaint_after(Duration::from_secs(1));
+        }
+    }
+
+    fn inspect_update(&mut self) {
+        if self.update_support.is_none() && !self.update_inspecting {
+            self.update_inspecting = true;
+            self.backend.send(Command::InspectUpdate);
+        }
+    }
+
+    fn maybe_download_update(&mut self) {
+        if !self.settings.check_for_updates
+            || !self.settings.download_updates_automatically
+            || self.update.is_none()
+            || !matches!(self.update_download, crate::updates::DownloadState::Idle)
+        {
+            return;
+        }
+        self.inspect_update();
+        if matches!(self.update_support, Some(Ok(_))) {
+            self.download_update();
+        }
+    }
+
+    fn download_update(&mut self) {
+        if !matches!(
+            self.update_download,
+            crate::updates::DownloadState::Idle | crate::updates::DownloadState::Failed(_)
+        ) || !matches!(self.update_support, Some(Ok(_)))
+        {
+            return;
+        }
+        if let Some(release) = self.update.clone() {
+            self.update_download = crate::updates::DownloadState::Downloading {
+                received: 0,
+                total: 0,
+            };
+            self.backend.send(Command::DownloadUpdate {
+                release,
+                source: crate::updates::Source::GitHub,
+            });
         }
     }
 
@@ -1578,6 +1659,41 @@ impl App {
         }
     }
 
+    pub fn load_custom_themes(&mut self) {
+        self.custom_themes.start(
+            self.dirs.config.join("themes"),
+            self.settings.custom_theme.clone(),
+            &self.waker,
+        );
+    }
+
+    fn poll_custom_themes(&mut self) {
+        if !self.custom_themes.poll() {
+            return;
+        }
+        let mut changed = false;
+        if let Some(filename) = &self.settings.custom_theme
+            && let Some(theme) = self.custom_themes.find(filename)
+            && self.settings.custom_theme_cache.as_ref() != Some(theme)
+        {
+            self.settings.custom_theme_cache = Some(theme.clone());
+            changed = true;
+        }
+        if self.custom_themes.follows_omarchy() {
+            if let Some(theme) = self.custom_themes.system_theme()
+                && self.settings.system_theme_cache.as_ref() != Some(theme)
+            {
+                self.settings.system_theme_cache = Some(theme.clone());
+                changed = true;
+            }
+        } else if self.settings.system_theme_cache.take().is_some() {
+            changed = true;
+        }
+        if changed {
+            self.mark_settings_dirty();
+        }
+    }
+
     fn apply_theme(&mut self, ctx: &egui::Context) {
         let dark = match self.settings.theme {
             ThemeChoice::Dark => true,
@@ -1586,12 +1702,15 @@ impl App {
                 .input(|input| input.raw.system_theme)
                 .is_none_or(|theme| theme == egui::Theme::Dark),
         };
-        if self.applied_dark != Some(dark) {
-            self.palette = if dark {
+        let palette = self.settings.cached_palette().unwrap_or_else(|| {
+            if dark {
                 Palette::dark()
             } else {
                 Palette::light()
-            };
+            }
+        });
+        if self.applied_dark.is_none() || self.palette != palette {
+            self.palette = palette;
             crate::theme::apply(ctx, &self.palette);
             self.applied_dark = Some(dark);
         }
@@ -2079,6 +2198,53 @@ impl App {
                     self.backend.send(Command::SearchMessages { query });
                 }
             }
+            Action::ShowUpdate => {
+                self.show_update = self.update.is_some();
+                self.inspect_update();
+            }
+            Action::CloseUpdate => self.show_update = false,
+            Action::DownloadUpdate => self.download_update(),
+            Action::InstallUpdate => {
+                if matches!(
+                    self.update_download,
+                    crate::updates::DownloadState::Ready(_)
+                ) {
+                    let crate::updates::DownloadState::Ready(prepared) = std::mem::replace(
+                        &mut self.update_download,
+                        crate::updates::DownloadState::Installing,
+                    ) else {
+                        unreachable!()
+                    };
+                    self.backend.send(Command::InstallUpdate {
+                        prepared,
+                        arguments: self.update_arguments.clone(),
+                    });
+                }
+            }
+            Action::SetTheme(choice) => {
+                self.settings.theme = choice;
+                self.settings.custom_theme = None;
+                self.settings.custom_theme_cache = None;
+                self.mark_settings_dirty();
+                self.apply_theme(ctx);
+            }
+            Action::SetCustomTheme(filename) => {
+                if let Some(theme) = self.custom_themes.find(&filename) {
+                    self.settings.custom_theme_cache = Some(theme.clone());
+                    self.settings.custom_theme = Some(filename);
+                    self.mark_settings_dirty();
+                    self.apply_theme(ctx);
+                }
+            }
+            Action::ReloadThemes => self.load_custom_themes(),
+            Action::OpenThemesFolder => {
+                let directory = self.dirs.config.join("themes");
+                std::thread::spawn(move || {
+                    if std::fs::create_dir_all(&directory).is_ok() {
+                        let _ = open::that(directory);
+                    }
+                });
+            }
             Action::SettingsChanged => self.mark_settings_dirty(),
             Action::ZoomBy(delta) => {
                 self.settings.zoom = (self.settings.zoom + delta).clamp(0.6, 2.0);
@@ -2159,6 +2325,7 @@ impl App {
         self.actions
             .extend(crate::macos::drain(ctx, self.window_hidden));
         self.handle_control_commands();
+        self.poll_custom_themes();
         self.handle_notification_opens();
         self.handle_events();
         self.tick(ctx);
@@ -2550,6 +2717,89 @@ mod tests {
     fn app() -> App {
         let root = std::env::temp_dir().join(format!("zapfast-app-{}", std::process::id()));
         App::headless(AppDirs::under(&root), Settings::default()).0
+    }
+
+    #[test]
+    fn custom_theme_cache_survives_a_missing_file_and_follows_system_updates() {
+        use crate::theme::custom::{Catalog, CustomTheme};
+        let mut app = app();
+        let ctx = egui::Context::default();
+        let mut first = CustomTheme {
+            filename: "mine.json".into(),
+            palette: Palette::dark(),
+        };
+        first.palette.accent = egui::Color32::RED;
+        app.custom_themes = Catalog::from_themes(vec![first.clone()]);
+        app.apply(Action::SetCustomTheme(first.filename.clone()), &ctx);
+        assert_eq!(app.palette.accent, egui::Color32::RED);
+        // Cached selection remains usable while the file is temporarily missing.
+        app.custom_themes = Catalog::default();
+        app.settings =
+            serde_json::from_str(&serde_json::to_string(&app.settings).unwrap()).unwrap();
+        app.apply_theme(&ctx);
+        assert_eq!(app.palette, first.palette);
+        app.apply(Action::SetTheme(ThemeChoice::System), &ctx);
+        assert!(app.settings.custom_theme.is_none());
+        let mut system = first;
+        system.filename = "omarchy.json".into();
+        system.palette.accent = egui::Color32::GREEN;
+        app.custom_themes
+            .load_system_test(Some(system.clone()), true);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.settings.system_theme_cache.as_ref() != Some(&system) {
+            app.poll_custom_themes();
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        app.apply_theme(&ctx);
+        assert_eq!(app.palette.accent, egui::Color32::GREEN);
+        app.apply(Action::SetTheme(ThemeChoice::Light), &ctx);
+        assert_eq!(app.palette, Palette::light());
+    }
+
+    #[test]
+    fn automatic_updates_require_opt_in_and_explicit_restart() {
+        use crate::updates::{
+            DownloadState,
+            install::{Installation, Kind, Prepared},
+        };
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.update = Some(crate::updates::Release {
+            version: "99.0.0".into(),
+            url: "https://github.com/crmne/zapfast/releases/latest".into(),
+        });
+        app.update_support = Some(Err("Use your package manager".into()));
+        app.settings.download_updates_automatically = true;
+        app.maybe_download_update();
+        assert!(matches!(app.update_download, DownloadState::Idle));
+        let installation = Installation {
+            executable: PathBuf::from("/fixture/zapfast"),
+            kind: Kind::Portable,
+        };
+        app.update_support = Some(Ok(installation.clone()));
+        app.settings.download_updates_automatically = false;
+        app.maybe_download_update();
+        assert!(matches!(app.update_download, DownloadState::Idle));
+        app.settings.download_updates_automatically = true;
+        app.maybe_download_update();
+        assert!(matches!(
+            app.update_download,
+            DownloadState::Downloading { .. }
+        ));
+        app.update_download = DownloadState::Ready(Box::new(Prepared {
+            installation,
+            directory: "/fixture/staging".into(),
+            payload: "/fixture/staging/next".into(),
+            sha256: String::new(),
+            version: "99.0.0".into(),
+        }));
+        app.maybe_download_update();
+        assert!(matches!(app.update_download, DownloadState::Ready(_)));
+        assert!(!app.quit_requested);
+        app.apply(Action::InstallUpdate, &ctx);
+        assert!(matches!(app.update_download, DownloadState::Installing));
+        assert!(!app.quit_requested, "wait for the helper before closing");
     }
 
     #[test]

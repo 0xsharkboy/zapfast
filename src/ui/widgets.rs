@@ -133,7 +133,7 @@ pub fn paint_avatar(
     let size = rect.width();
     let mut painted = false;
     if let Some(picture) = picture {
-        let uri = format!("file://{}", picture.display());
+        let uri = crate::util::image_uri(picture);
         let image = egui::Image::new(uri)
             .fit_to_exact_size(Vec2::splat(size))
             .corner_radius(size / 2.0);

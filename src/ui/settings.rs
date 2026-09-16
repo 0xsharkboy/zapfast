@@ -43,14 +43,33 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     section(ui, app, "Appearance");
                     widgets::setting_row(ui, &palette, "Theme", "", |ui| {
                         for choice in ThemeChoice::ALL.iter().rev() {
-                            let active = app.settings.theme == *choice;
+                            let active = app.settings.custom_theme.is_none() && app.settings.theme == *choice;
                             if theme::soft_button(ui, &palette, None, choice.label(), active).clicked()
                                 && !active
                             {
-                                app.settings.theme = *choice;
-                                app.actions.push(Action::SettingsChanged);
+                                app.actions.push(Action::SetTheme(*choice));
                             }
                         }
+                    });
+                    let selected = app.settings.custom_theme.as_deref();
+                    let detail = app.custom_themes.detail(selected);
+                    let detail = if detail.is_empty() { selected.map(theme::custom::label).unwrap_or("Choose a JSON palette from the themes folder.") } else { detail };
+                    widgets::setting_row(ui, &palette, "Local themes", detail, |ui| {
+                        if theme::soft_button(ui, &palette, None, "Reload", false).clicked() {
+                            app.actions.push(Action::ReloadThemes);
+                        }
+                        if theme::soft_button(ui, &palette, None, "Open folder", false).clicked() {
+                            app.actions.push(Action::OpenThemesFolder);
+                        }
+                        egui::ComboBox::from_id_salt("local-theme")
+                            .selected_text("Choose a palette")
+                            .show_ui(ui, |ui| {
+                                for custom in app.custom_themes.picker_themes() {
+                                    if widgets::menu_item(ui, &palette, None, theme::custom::label(&custom.filename)) {
+                                        app.actions.push(Action::SetCustomTheme(custom.filename.clone()));
+                                    }
+                                }
+                            });
                     });
                     widgets::setting_row(
                         ui,
@@ -91,6 +110,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     section(ui, app, "Window");
                     toggle(ui, app, "Keep running when the window closes", "Keep ZapFast linked in the system tray. Quit from the tray menu or with Ctrl+Q.", |settings| &mut settings.keep_running_in_background);
                     toggle(ui, app, "Notify about new messages", "Show desktop notifications when the window is hidden, in the background, or showing another chat. Muted chats do not notify you.", |settings| &mut settings.notifications);
+                    toggle(ui, app, "Download updates automatically", "Download and verify new releases in the background. You choose when to restart. Native packages and Flatpak update through their package manager.", |settings| &mut settings.download_updates_automatically);
                     toggle(ui, app, "Check for updates", "Ask GitHub once a day whether a newer ZapFast release exists. The request identifies only ZapFast and its version.", |settings| &mut settings.check_for_updates);
 
                     widgets::setting_row(

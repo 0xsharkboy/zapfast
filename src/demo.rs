@@ -804,11 +804,59 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
             "chat" | "" => {}
             "empty" => app.open_chat = None,
             "settings" => app.page = Page::Settings,
-            "update" => {
+            "themes" => {
+                use crate::theme::custom::{Catalog, CustomTheme};
+                let mut palette = crate::theme::Palette::dark();
+                palette.accent = egui::Color32::from_rgb(137, 180, 250);
+                palette.bubble_out = egui::Color32::from_rgb(41, 57, 84);
+                let theme = CustomTheme {
+                    filename: "Moonlight 🌙.json".into(),
+                    palette,
+                };
+                app.custom_themes = Catalog::preview(vec![theme.clone()], false);
+                app.settings.custom_theme = Some(theme.filename.clone());
+                app.settings.custom_theme_cache = Some(theme);
+                app.page = Page::Settings;
+            }
+            "update" | "update-downloading" | "update-ready" | "update-failed"
+            | "update-managed" => {
+                use crate::updates::{
+                    DownloadState,
+                    install::{Installation, Kind, Prepared},
+                };
                 app.update = Some(crate::updates::Release {
                     version: "99.0.0".to_owned(),
                     url: "https://github.com/crmne/zapfast/releases/latest".to_owned(),
                 });
+                app.show_update = true;
+                let installation = Installation {
+                    executable: "/demo/zapfast".into(),
+                    kind: Kind::Portable,
+                };
+                app.update_support = Some(Ok(installation.clone()));
+                app.update_download = match part {
+                    "update-downloading" => DownloadState::Downloading {
+                        received: 8_000_000,
+                        total: 20_000_000,
+                    },
+                    "update-ready" => DownloadState::Ready(Box::new(Prepared {
+                        installation,
+                        directory: "/demo/staging".into(),
+                        payload: "/demo/staging/next".into(),
+                        sha256: String::new(),
+                        version: "99.0.0".into(),
+                    })),
+                    "update-failed" => DownloadState::Failed(
+                        "The download could not be verified. Try downloading it again.".into(),
+                    ),
+                    _ => DownloadState::Idle,
+                };
+                if part == "update-managed" {
+                    app.update_support = Some(Err(
+                        "Update this installation through your package manager or software center."
+                            .into(),
+                    ));
+                }
             }
             "shortcuts" => app.dialog = Some(Dialog::Shortcuts),
             "about" => app.dialog = Some(Dialog::About),
@@ -1134,6 +1182,11 @@ mod tests {
             "empty",
             "settings",
             "update",
+            "update-downloading",
+            "update-ready",
+            "update-failed",
+            "update-managed",
+            "themes",
             "shortcuts",
             "about",
             "info",

@@ -64,7 +64,9 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
 - **View attachments.** ZapFast downloads files up to 64 MB automatically or
   on click. Photos, stickers, GIFs, voice messages, audio, locations, contacts,
   polls, and link previews appear in the chat. Videos and documents open in
-  their default desktop apps. If an attachment has expired, ZapFast asks your
+  their default desktop apps. Profile pictures and downloaded images support
+  Windows drive paths and filenames with spaces or non-ASCII characters.
+  If an attachment has expired, ZapFast asks your
   phone to upload it again.
 - **Emoji, GIF, and sticker picker.** Search emoji and GIFs, use recent emoji
   and stickers, and save stickers with a right-click. Emoji autocomplete and
@@ -80,6 +82,8 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
   groups are read-only for non-admins.
 - **Presence.** See online, last-seen, and typing status, and send your typing
   status.
+- **Idle rendering.** History-sync progress updates when data arrives. Animated
+  stickers and GIFs play only while their message or picker tile is visible.
 - **Runs in the background.** Closing the window keeps ZapFast linked in the
   system tray. Reopen it from the tray or by launching it again. Quit from the
   tray or with `Ctrl+Q`, or disable this behavior in Settings.
@@ -89,16 +93,19 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
   device dismisses its outstanding notifications.
 - **Update notices.** ZapFast checks GitHub once a day and shows a download
   link when a newer release is available. You can turn this off in Settings.
-- **Light and dark**, or follow the system. Zoom with Ctrl+plus and
-  Ctrl+minus.
+- **Themes.** Light, dark, follow the system, or a local JSON palette. Native
+  Linux packages can follow Omarchy colors without restarting the app. Zoom with
+  Ctrl+plus and Ctrl+minus.
 - **Copy text.** Select part of a message or copy across messages in
   WhatsApp's `[time, date] Name:` format. Contact names and numbers are also
   selectable.
 - **Keyboard shortcuts.** `Ctrl+K` searches, `Alt+↑/↓` switches chats and
   keeps the active chat visible in the list, `Esc` cancels the current action,
   and `Ctrl+/` lists all shortcuts.
-- **Local storage.** Messages are stored in one SQLite file and attachments
-  in the cache directory. Unlinking deletes both and removes this device from
+- **Local storage.** Messages, contacts and sticker metadata are stored in a
+  SQLCipher-encrypted archive, unlocked automatically through your OS keyring.
+  Existing plaintext archives are migrated on first use. Attachments remain
+  ordinary files in the cache directory. Unlinking deletes both and removes this device from
   your phone.
 
 ## What it does not do yet
@@ -140,16 +147,44 @@ application bundle after installing ZapFast.
 
 Releases before 0.13.0 keep their original FastsApp filenames.
 
+### Flatpak
+
+Flatpak packaging lives in `packaging/flatpak/`, following Spotifast's source
+manifest and release-bundle setup. Future releases will attach an x86_64
+`.flatpak` bundle; install a downloaded bundle with `flatpak install --user FILE`
+and run `flatpak run rocks.zapfast.ZapFast`. Flathub publication is pending;
+ZapFast is not yet listed there. See [PACKAGING.md](PACKAGING.md) for local builds
+and preparing a Flathub submission. File selection uses desktop portals;
+the sandbox has no general access to your home directory.
+
+### Archive encryption
+
+The archive key is a random 256-bit secret in Secret Service on Linux, Keychain
+on macOS, or Windows Credential Manager. Linux needs a working Secret Service
+provider (for example GNOME Keyring or KeePassXC with Secret Service enabled).
+If the keyring is locked or unavailable, unlock it and click Retry; ZapFast keeps
+its archive intact and waits before connecting. It never saves a replacement
+plaintext archive. Back up both the archive and its OS keyring key: copying only
+`archive.db` to another computer is insufficient.
+
+Only `archive.db` and its SQLite journal/WAL are encrypted. Device credentials in
+`session.db`, downloaded media, profile pictures, saved sticker files and settings
+remain ordinary files. Use full-disk encryption for those files, swap, backups and
+remnants of the old plaintext archive. Migration removes the original only after
+verifying its encrypted copy; deletion cannot guarantee erasure from SSDs or
+snapshots. Keyring unlocking also does not protect against software running as you
+while your login is unlocked.
+
 ### From source
 
-ZapFast needs Rust. `rust-toolchain.toml` pins the exact version. On Linux,
+ZapFast needs Rust, a C/C++ toolchain, CMake and Perl (for bundled OpenSSL). `rust-toolchain.toml` pins the exact version. On Linux,
 it also needs GUI development packages:
 
 ```sh
 # Debian and Ubuntu
-sudo apt install libxkbcommon-dev libwayland-dev libgl1-mesa-dev
+sudo apt install libxkbcommon-dev libwayland-dev libgl1-mesa-dev libasound2-dev cmake perl
 # Arch
-sudo pacman -S libxkbcommon wayland mesa
+sudo pacman -S libxkbcommon wayland mesa alsa-lib cmake perl
 ```
 
 Then:
@@ -187,7 +222,7 @@ to your phone and linked devices.
 | --- | --- | --- |
 | Settings | `~/.config/zapfast/settings.json` | JSON, safe to edit |
 | Device keys | `~/.local/state/zapfast/session.db` | Owned by whatsapp-rust; deleting it unlinks |
-| Messages | `~/.local/state/zapfast/archive.db` | SQLite; raw messages contain the keys needed to download attachments |
+| Messages | `~/.local/state/zapfast/archive.db` | SQLCipher-encrypted SQLite, unlocked by the OS keyring; raw messages retain attachment keys |
 | Attachments, avatars | `~/.cache/zapfast/` | Safe to delete |
 | Saved stickers and packs | `~/.local/state/zapfast/stickers/` | Plain WebP files; each pack is a folder |
 | Log of the last run | `~/.local/state/zapfast/zapfast.log` | `--verbose` for more |
@@ -199,6 +234,43 @@ message archive, saved stickers, caches, and window state from `fastsapp`
 precedence and are never overwritten. Quit FastsApp before starting ZapFast;
 if an older copy is still running, the new launch brings its window forward.
 Your phone may keep showing the old linked-device name until you link again.
+
+### Local themes
+
+Put JSON palette files in the `themes` folder beside `settings.json`. Choose
+**Settings → Local themes → Open folder**, then **Reload** after editing. For example:
+
+```json
+{"base":"dark","colors":{"accent":"#89b4fa","bubble_out":"#293954"}}
+```
+
+Unspecified colors inherit the light or dark base. Color names match `Palette`
+in `src/theme.rs`; use `#RRGGBB` or `#RRGGBBAA`. The last accepted palette is cached
+in settings, so a missing or damaged theme file does not reset your appearance.
+`zapfast reload-themes` tells an existing instance to reload, including while its
+window is closed. It never launches a stopped app.
+
+On Omarchy, native packages register a missing per-user template and theme hook
+on first launch; existing user files are preserved. Choose **Follow system** or
+**Omarchy** to follow desktop colors. Other desktops keep their normal light/dark
+system preference. Portable/source installs can install the template and hook
+from `contrib/omarchy/`; Flatpak does not install host-desktop hooks.
+
+### Updating ZapFast
+
+ZapFast checks GitHub once a day when **Check for updates** is enabled.
+Click **Update** in the banner to download and verify a newer release, then
+**Restart to update** when convenient. **Download updates automatically** is
+optional and off by default; it downloads in the background and still waits for
+you to restart. Downloads contact GitHub's API and release-asset hosts and are
+checked against the release's SHA-256 checksums. The updater keeps a backup and
+restores it if the updated app cannot start.
+
+The in-app updater supports marked portable downloads, the Windows installer,
+and the macOS app in Applications. Keep `zapfast-portable.txt` beside a portable
+executable. AUR, DEB, RPM, Flatpak, Cargo and Homebrew installations use their
+package manager. Older portable downloads without the marker need one manual
+upgrade. No account or additional service is needed.
 
 ## Developing
 

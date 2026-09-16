@@ -2838,19 +2838,24 @@ fn picture(
         None => (width.min(PICTURE_WIDTH), PICTURE_HEIGHT),
     };
     if let Some(path) = &media.path {
-        let animated = sticker == Some(true);
-        let playing = animated.then(|| animation::frame(ui.ctx(), path));
-        if let Some(animation::Frame::Ready(texture)) = &playing {
-            let size = texture.size_vec2();
-            let size = fit_sticker(size.x, size.y);
+        if sticker == Some(true) {
+            let size = fit_sticker(
+                media.width.unwrap_or(180) as f32,
+                media.height.unwrap_or(180) as f32,
+            );
             let (rect, response) = ui.allocate_exact_size(size, Sense::click());
             if ui.is_rect_visible(rect) {
-                ui.painter().image(
-                    texture.id(),
-                    rect,
-                    Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                    Color32::WHITE,
-                );
+                match animation::frame(ui, path, rect) {
+                    animation::Frame::Ready(texture) => {
+                        ui.painter().image(
+                            texture.id(),
+                            rect,
+                            Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                            Color32::WHITE,
+                        );
+                    }
+                    _ => egui::Image::new(file_uri(path)).paint_at(ui, rect),
+                }
             }
             if response
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -3038,11 +3043,11 @@ fn video(
     let uri = thumbnail_uri(ui.ctx(), &message.chat, &message.id, thumbnail);
     let size = frame_size(media, Some((16, 9)), width.min(PICTURE_WIDTH));
     // Play downloaded GIFs in place; keep a poster for other videos.
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let playing = match (&media.path, gif) {
-        (Some(path), true) => Some(animation::frame(ui.ctx(), path)),
+        (Some(path), true) => Some(animation::frame(ui, path, rect)),
         _ => None,
     };
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     if let Some(animation::Frame::Ready(texture)) = &playing {
         if ui.is_rect_visible(rect) {
             ui.painter().image(
@@ -3482,7 +3487,7 @@ fn recording_strip(app: &mut App, ui: &mut egui::Ui) {
 }
 
 fn file_uri(path: &Path) -> String {
-    format!("file://{}", path.display())
+    crate::util::image_uri(path)
 }
 
 /// Whether a conversation has visible content. Used by tests.

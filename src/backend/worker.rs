@@ -1771,6 +1771,22 @@ impl Worker {
         let parsed = tokio::task::spawn_blocking(move || parse_history(&compressed)).await;
         match parsed {
             Ok(Ok(parsed)) => {
+                if on_demand {
+                    log::info!(
+                        "poll recovery: on-demand history received; chats={}, messages={}, standalone_votes={}",
+                        parsed.chats.len(),
+                        parsed
+                            .chats
+                            .iter()
+                            .map(|chat| chat.messages.len())
+                            .sum::<usize>(),
+                        parsed
+                            .chats
+                            .iter()
+                            .map(|chat| chat.poll_updates.len())
+                            .sum::<usize>()
+                    );
+                }
                 let filed = self.apply_history(parsed, !on_demand);
                 if on_demand {
                     self.answer_older(filed);
@@ -1954,6 +1970,7 @@ impl Worker {
                     forwarded: message.forwarded,
                     thumbnail: message.thumbnail,
                 };
+                let mut poll_history_received = false;
                 if matches!(row.content, Content::Poll { .. }) {
                     if let Ok(raw) = wa::Message::decode_from_slice(&message.raw) {
                         self.remember_poll(
@@ -1963,14 +1980,16 @@ impl Worker {
                             message.poll_secret.as_deref(),
                         );
                     }
-                    self.history_poll_votes(&row, &message.poll_votes);
+                    poll_history_received = self.history_poll_votes(&row, &message.poll_votes);
                 }
                 if let Err(error) = self.archive.insert_message(&row, Some(&message.raw)) {
                     log::warn!("could not store a history message: {error}");
                 }
                 if matches!(row.content, Content::Poll { .. }) {
-                    let _ = self.archive.mark_poll_history(&id, &row.id);
-                    self.poll_history.finish(&id, &row.id);
+                    if poll_history_received {
+                        let _ = self.archive.mark_poll_history(&id, &row.id);
+                        self.poll_history.finish(&id, &row.id);
+                    }
                     self.emit_message(&id, &row.id);
                 }
             }
@@ -2092,7 +2111,9 @@ impl Worker {
         let commands = self.commands.clone();
         tokio::spawn(async move {
             if let Err(error) = client
-                .fetch_message_history(&jid, &id, from_me, timestamp * 1000, PHONE_BATCH)
+                // Despite its `Ms` name, the protocol field takes Unix seconds.
+                // https://github.com/tulir/whatsmeow/commit/54650307d891f89ab346a57953d316106caee371
+                .fetch_message_history(&jid, &id, from_me, timestamp, PHONE_BATCH)
                 .await
             {
                 log::warn!("older messages not requested: {error}");

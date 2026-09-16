@@ -56,6 +56,9 @@ protocol. These notes are for coding agents and new contributors.
   polls request phone history automatically, anchored after the creation message
   so the response includes its vote snapshot. `poll_history.rs` serializes these
   requests and retries from 30 seconds to 15 minutes without an interface timer.
+  History request timestamps are Unix seconds: the library argument and wire
+  field misleadingly end in `Ms`. Do not multiply archive timestamps by 1,000.
+  A repeated poll question with no usable vote snapshot cannot finish recovery.
 - Chat ids are canonical strings: a chat behind a privacy id (`@lid`) is
   filed under its phone number once the mapping is known. Use
   `Worker::canonical` for anything that arrives as a `Jid`.

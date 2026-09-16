@@ -87,6 +87,7 @@ impl Worker {
     pub(super) fn pump_poll_history(&mut self) {
         let now = Instant::now();
         if let Some((chat, id)) = self.poll_history.expire(now) {
+            log::info!("poll recovery: phone history timed out; retry scheduled");
             self.emit_message(&chat, &id);
         }
         if !self.status.is_connected() || !self.pending_older.is_empty() {
@@ -112,6 +113,10 @@ impl Worker {
             self.emit_message(&chat, &id);
             return;
         };
+        log::info!(
+            "poll recovery: requesting phone history; anchor_present={}",
+            !anchor.is_empty()
+        );
         let commands = self.commands.clone();
         tokio::spawn(async move {
             if client
@@ -119,25 +124,32 @@ impl Worker {
                     &jid,
                     &anchor,
                     from_me,
-                    timestamp.saturating_mul(1000),
+                    // The misleadingly named oldestMsgTimestampMs wire field
+                    // takes Unix seconds, as does the archive.
+                    // https://github.com/tulir/whatsmeow/commit/54650307d891f89ab346a57953d316106caee371
+                    timestamp,
                     PHONE_BATCH,
                 )
                 .await
                 .is_err()
             {
+                log::info!("poll recovery: phone history request failed");
                 let _ = commands.send(Command::PollHistoryFailed {
                     chat,
                     message: id,
                     requested: now,
                 });
+            } else {
+                log::info!("poll recovery: phone history request sent");
             }
         });
     }
 
-    pub(super) fn history_poll_votes(&self, row: &Message, updates: &[wa::PollUpdate]) {
+    pub(super) fn history_poll_votes(&self, row: &Message, updates: &[wa::PollUpdate]) -> bool {
         let Content::Poll { options, state, .. } = &row.content else {
-            return;
+            return false;
         };
+        let mut accepted = 0;
         for update in updates {
             let Some(key) = update.poll_update_message_key.as_option() else {
                 continue;
@@ -187,8 +199,17 @@ impl Worker {
             };
             if let Err(error) = self.archive.save_poll_vote(&vote) {
                 log::warn!("could not store historical poll votes: {error}");
+            } else {
+                accepted += 1;
             }
         }
+        log::info!(
+            "poll recovery: phone snapshot contained {} votes; {accepted} usable",
+            updates.len()
+        );
+        // Receiving the question again does not prove the phone sent its votes.
+        // Empty or unusable snapshots must not end automatic recovery.
+        !updates.is_empty() && accepted == updates.len()
     }
 
     pub(super) fn remember_poll(
@@ -683,6 +704,87 @@ mod tests {
                 ..Default::default()
             },
         }
+    }
+
+    #[test]
+    fn empty_or_unusable_phone_snapshots_do_not_stop_automatic_recovery() {
+        let (mut worker, _events, _commands, _wa) = super::super::receipt_tests::worker();
+        let chat = "123@g.us";
+        let mut row = crate::archive::tests::message(chat, "poll", 1_789_551_600, false);
+        row.sender = "100@s.whatsapp.net".into();
+        row.content = content();
+        let raw = creation_archive(&row.content, &[7; 32]);
+        worker.store_message(row.clone(), Some(raw.encode_to_vec()), None);
+        worker.refresh_poll(chat.into(), row.id.clone());
+        let now = Instant::now();
+        assert!(worker.poll_history.next(now).is_some());
+
+        for updates in [
+            Vec::new(),
+            vec![wa::PollUpdate {
+                poll_update_message_key: MessageField::some(wa::MessageKey {
+                    id: Some("unmatched-vote".into()),
+                    participant: Some("200@s.whatsapp.net".into()),
+                    ..Default::default()
+                }),
+                vote: MessageField::some(wa::message::PollVoteMessage {
+                    selected_options: vec![vec![0; 32]],
+                }),
+                ..Default::default()
+            }],
+        ] {
+            worker.apply_history(
+                ParsedHistory {
+                    chats: vec![parse_conversation(wa::Conversation {
+                        id: chat.into(),
+                        messages: vec![wa::HistorySyncMsg {
+                            message: MessageField::some(wa::WebMessageInfo {
+                                key: MessageField::some(wa::MessageKey {
+                                    id: Some(row.id.clone()),
+                                    remote_jid: Some(chat.into()),
+                                    participant: Some(row.sender.clone()),
+                                    from_me: Some(false),
+                                }),
+                                message: MessageField::some(raw.clone()),
+                                message_timestamp: Some(row.timestamp as u64),
+                                poll_updates: updates,
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    })],
+                    push_names: Vec::new(),
+                    lids: Vec::new(),
+                    stickers: Vec::new(),
+                },
+                false,
+            );
+            worker.polish_poll(&mut row);
+            let Content::Poll { state, .. } = &row.content else {
+                panic!("poll")
+            };
+            assert!(!state.history_complete);
+            assert!(state.refreshing);
+        }
+        assert!(
+            worker
+                .poll_history
+                .expire(now + Duration::from_secs(30))
+                .is_some()
+        );
+        assert!(
+            worker
+                .poll_history
+                .next(now + Duration::from_secs(59))
+                .is_none()
+        );
+        assert!(
+            worker
+                .poll_history
+                .next(now + Duration::from_secs(60))
+                .is_some()
+        );
     }
 
     #[test]

@@ -118,5 +118,10 @@ flatpak-builder --user --install --force-clean build-dir /path/to/flathub-checko
 ```
 
 Flathub submission/review is a separate publication step; the manifest alone does
-not make ZapFast available in Flathub. The GitHub release job includes the bundle
+not make ZapFast available in Flathub. A maintainer must submit it manually:
+[Flathub's requirements](https://docs.flathub.org/docs/for-app-authors/requirements#generative-ai-policy)
+prohibit AI agents from submitting or writing submission interactions and require
+disclosure of generated material. Review the manifests and these changes before
+submitting. The manifests use the current Freedesktop 26.08 runtime; the CI builder
+container is 25.08 and installs the runtime and SDK named by the manifest. The GitHub release job includes the bundle
 in `checksums.txt`. No existing release files are replaced by this change.

@@ -36,7 +36,9 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
     let escape =
         !menu_open && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape));
     if escape {
-        if app.dialog.is_some() {
+        if app.show_update {
+            actions.push(Action::CloseUpdate);
+        } else if app.dialog.is_some() {
             actions.push(Action::CloseDialog);
         } else if app.recording.is_some() {
             actions.push(Action::CancelRecording);
@@ -124,5 +126,41 @@ pub fn label(keys: &str) -> String {
         keys.replace("Ctrl", "⌘").replace("Alt", "⌥")
     } else {
         keys.to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escape_closes_the_update_before_touching_an_unfinished_message() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = App::headless(
+            crate::paths::AppDirs::under(root.path()),
+            crate::settings::Settings::default(),
+        )
+        .0;
+        app.show_update = true;
+        app.page = Page::Settings;
+        app.reply_to = Some("reply-fixture".into());
+        app.pending
+            .push(crate::app::Pending::File("unsent.png".into()));
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| handle(&mut app, ui.ctx()),
+        );
+        output.textures_delta.clear();
+        assert!(matches!(app.actions.as_slice(), [Action::CloseUpdate]));
     }
 }

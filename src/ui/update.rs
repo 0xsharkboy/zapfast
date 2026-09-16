@@ -14,7 +14,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         return;
     };
     let palette = app.palette;
-    let mut close = ctx.input(|input| input.key_pressed(egui::Key::Escape));
+    let mut close = false;
     let frame = Frame::new()
         .fill(palette.overlay)
         .stroke(Stroke::new(1.0, palette.outline))

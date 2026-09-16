@@ -178,7 +178,11 @@ pub(super) fn open(path: &Path, key: &[u8; 32]) -> Result<Connection> {
         );
         drop(verified);
         drop(source);
-        fs::File::open(&staging)?.sync_all()?;
+        // FlushFileBuffers on Windows requires a writable handle.
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&staging)?
+            .sync_all()?;
         fs::rename(&staging, path)
             .context("Could not replace the archive with its encrypted copy")?;
         #[cfg(unix)]

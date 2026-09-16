@@ -3,7 +3,7 @@
 # job unpacks the release tarball into built/ beside this file first.
 id: rocks.zapfast.ZapFast
 runtime: org.freedesktop.Platform
-runtime-version: '25.08'
+runtime-version: '26.08'
 sdk: org.freedesktop.Sdk
 command: zapfast
 finish-args:

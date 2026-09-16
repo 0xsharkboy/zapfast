@@ -54,9 +54,12 @@ protocol. These notes are for coding agents and new contributors.
   checksums, startup acknowledgement and rollback intact. Portable releases carry
   `packaging/zapfast-portable.txt`; the Windows installer has its own marker.
 - `src/theme/custom.rs` scans local JSON palettes off the UI thread, caching the
-  last usable choice in settings. Native Linux packages ship optional Omarchy
-  assets; setup preserves existing per-user hooks and templates. `reload-themes`
-  uses the single-instance channel without opening a window.
+  last usable choice in settings, with shared Spotifast palettes embedded as
+  defaults. On Linux filesystem notifications reload the catalog and the active
+  Omarchy palette without a repaint timer; following Omarchy does not require
+  packaged assets. Native packages ship optional hooks and templates, preserving
+  existing per-user files. `reload-themes` uses the single-instance channel
+  without opening a window.
 - `src/theme.rs` owns colours, fonts, and icons; `src/ui/widgets.rs` the
   shared controls. New icons go in `assets/icons/` as 24px Lucide-style SVGs
   and in the `icons!` table.
@@ -169,6 +172,11 @@ protocol. These notes are for coding agents and new contributors.
   recipient. Never promote a group from one reader, apply a receipt to earlier
   messages, or infer a historical audience from current membership. History
   trusts the phone's aggregate status, not a partial `user_receipt` list.
+- Private read-state writes all use the `regular_low` app-state collection.
+  `backend::read_sync` permits one at a time and backs off the whole queue after
+  failure; per-chat retry queues would repeatedly rebuild the same failed
+  collection. Pending positions stay in the archive until acknowledged. Snapshot
+  recovery and no-progress conflict detection belong to whatsapp-rust.
 - The name and icon under the phone's Linked devices come from
   `DevicePropsOverride` in `start_bot` (`os` is the name shown, the
   platform type picks the icon); WhatsApp reads them at pairing only, so a

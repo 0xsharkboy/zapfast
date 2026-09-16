@@ -13,6 +13,7 @@ use crate::model::{Chat, ChatId, Contact, Gif, GifError, Message, StickerPack};
 use crate::paths::AppDirs;
 
 // Re-exported so the picker can detect pasted Signal pack links.
+mod read_sync;
 pub(crate) mod sticker_import;
 mod worker;
 

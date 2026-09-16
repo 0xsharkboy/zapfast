@@ -302,8 +302,7 @@ impl App {
     pub fn new(waker: &Waker, dirs: AppDirs, settings: Settings, options: AppOptions) -> Self {
         let backend = Backend::spawn(dirs.clone(), waker.clone());
         let mut app = Self::with_backend(dirs, settings, backend, waker.clone());
-        #[cfg(target_os = "linux")]
-        app.custom_themes.enable_packaged_omarchy();
+        app.custom_themes.enable_desktop_themes();
         app.load_custom_themes();
         if options.tray {
             let waker = waker.clone();
@@ -1668,6 +1667,9 @@ impl App {
     }
 
     fn poll_custom_themes(&mut self) {
+        if self.custom_themes.needs_reload() {
+            self.load_custom_themes();
+        }
         if !self.custom_themes.poll() {
             return;
         }
@@ -1695,13 +1697,23 @@ impl App {
     }
 
     fn apply_theme(&mut self, ctx: &egui::Context) {
-        let dark = match self.settings.theme {
-            ThemeChoice::Dark => true,
-            ThemeChoice::Light => false,
-            ThemeChoice::System => ctx
-                .input(|input| input.raw.system_theme)
-                .is_none_or(|theme| theme == egui::Theme::Dark),
-        };
+        let preference = self.settings.cached_palette().map_or_else(
+            || match self.settings.theme {
+                ThemeChoice::Dark => egui::ThemePreference::Dark,
+                ThemeChoice::Light => egui::ThemePreference::Light,
+                ThemeChoice::System => egui::ThemePreference::System,
+            },
+            |palette| {
+                if palette.dark {
+                    egui::ThemePreference::Dark
+                } else {
+                    egui::ThemePreference::Light
+                }
+            },
+        );
+        ctx.set_theme(preference);
+        // Use the same preference for our palette and egui's native controls.
+        let dark = ctx.theme() == egui::Theme::Dark;
         let palette = self.settings.cached_palette().unwrap_or_else(|| {
             if dark {
                 Palette::dark()
@@ -2717,6 +2729,24 @@ mod tests {
     fn app() -> App {
         let root = std::env::temp_dir().join(format!("zapfast-app-{}", std::process::id()));
         App::headless(AppDirs::under(&root), Settings::default()).0
+    }
+
+    #[test]
+    fn follow_system_retains_the_os_theme_between_platform_events() {
+        let mut app = app();
+        app.settings.theme = ThemeChoice::System;
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        for theme in [egui::Theme::Light, egui::Theme::Dark] {
+            input.system_theme = Some(theme);
+            // Native input preserves the OS preference when taking each frame.
+            for _ in 0..2 {
+                let mut output = ctx.run_ui(input.take(), |_| app.apply_theme(&ctx));
+                output.textures_delta.clear();
+                assert_eq!(app.palette.dark, theme == egui::Theme::Dark);
+                assert_eq!(ctx.theme(), theme);
+            }
+        }
     }
 
     #[test]

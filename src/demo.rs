@@ -804,6 +804,17 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
             "chat" | "" => {}
             "empty" => app.open_chat = None,
             "settings" => app.page = Page::Settings,
+            choice if choice.starts_with("theme=") => {
+                let themes: Vec<_> = crate::theme::presets::themes().collect();
+                if let Some(theme) = themes
+                    .iter()
+                    .find(|theme| Some(theme.filename.as_str()) == choice.strip_prefix("theme="))
+                {
+                    app.settings.custom_theme = Some(theme.filename.clone());
+                    app.settings.custom_theme_cache = Some(theme.clone());
+                }
+                app.custom_themes = crate::theme::custom::Catalog::preview(themes, false);
+            }
             "themes" => {
                 use crate::theme::custom::{Catalog, CustomTheme};
                 let mut palette = crate::theme::Palette::dark();
@@ -813,7 +824,9 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                     filename: "Moonlight 🌙.json".into(),
                     palette,
                 };
-                app.custom_themes = Catalog::preview(vec![theme.clone()], false);
+                let mut themes: Vec<_> = crate::theme::presets::themes().collect();
+                themes.push(theme.clone());
+                app.custom_themes = Catalog::preview(themes, false);
                 app.settings.custom_theme = Some(theme.filename.clone());
                 app.settings.custom_theme_cache = Some(theme);
                 app.page = Page::Settings;
@@ -1187,6 +1200,11 @@ mod tests {
             "update-failed",
             "update-managed",
             "themes",
+            "theme=Catppuccin.json",
+            "theme=Catppuccin Latte.json",
+            "theme=Nord.json",
+            "theme=Ristretto.json",
+            "theme=Tokyo Night.json",
             "shortcuts",
             "about",
             "info",

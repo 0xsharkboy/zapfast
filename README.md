@@ -84,6 +84,11 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
   status.
 - **Idle rendering.** History-sync progress updates when data arrives. Animated
   stickers and GIFs play only while their message or picker tile is visible.
+- **Sync recovery.** A conflicting app-state collection is recovered through
+  whatsapp-rust, including requesting a fresh snapshot from the paired phone
+  when validation fails. Private read-state updates run one at a time. Failures
+  pause the whole queue with backoff from 30 seconds to 15 minutes; pending reads
+  remain saved and resume automatically. New messages can still arrive.
 - **Runs in the background.** Closing the window keeps ZapFast linked in the
   system tray. Reopen it from the tray or by launching it again. Quit from the
   tray or with `Ctrl+Q`, or disable this behavior in Settings.
@@ -198,7 +203,9 @@ The desktop file and icon are in `packaging/`.
 
 `whatsapp-rust` is pinned to a Git commit because version 0.7.0 on crates.io
 enables a `simd` feature that needs nightly Rust. The pinned commit builds on
-stable Rust.
+stable Rust and includes the upstream fixes for missing app-state snapshots and
+conflicts that make no progress. ZapFast does not reset your session to recover
+a collection.
 
 ## Using it
 
@@ -237,24 +244,31 @@ Your phone may keep showing the old linked-device name until you link again.
 
 ### Local themes
 
-Put JSON palette files in the `themes` folder beside `settings.json`. Choose
-**Settings → Local themes → Open folder**, then **Reload** after editing. For example:
+**Settings → Appearance → Theme** uses the same picker as Spotifast, with
+Follow system, Light, Dark, and its Catppuccin, Catppuccin Latte, Nord, Ristretto,
+and Tokyo Night palettes. Choose **Open themes folder** below the picker to add
+JSON palettes beside `settings.json`. A local file with a bundled palette's name
+overrides it. For example:
 
 ```json
 {"base":"dark","colors":{"accent":"#89b4fa","bubble_out":"#293954"}}
 ```
 
-Unspecified colors inherit the light or dark base. Color names match `Palette`
+Unspecified colors inherit the light or dark base. Spotifast palettes also work:
+chat backgrounds, bubbles, and links derive from their interface colors when not
+specified. Color names match `Palette`
 in `src/theme.rs`; use `#RRGGBB` or `#RRGGBBAA`. The last accepted palette is cached
 in settings, so a missing or damaged theme file does not reset your appearance.
-`zapfast reload-themes` tells an existing instance to reload, including while its
-window is closed. It never launches a stopped app.
+Linux watches the themes folder for changes without periodic repaints. On other
+platforms, use `zapfast reload-themes` after editing. The command also works while
+the window is closed and never launches a stopped app.
 
-On Omarchy, native packages register a missing per-user template and theme hook
-on first launch; existing user files are preserved. Choose **Follow system** or
-**Omarchy** to follow desktop colors. Other desktops keep their normal light/dark
-system preference. Portable/source installs can install the template and hook
-from `contrib/omarchy/`; Flatpak does not install host-desktop hooks.
+On Omarchy, **Follow system** and **Omarchy** read the active desktop palette and
+follow its changes in native, portable, and source builds, even without installed
+hooks. Other desktops keep their normal light/dark system preference. Native
+packages additionally register a missing per-user template and theme hook on
+first launch; existing user files are preserved. Flatpak uses the desktop's
+light/dark preference and does not read host theme files or install desktop hooks.
 
 ### Updating ZapFast
 

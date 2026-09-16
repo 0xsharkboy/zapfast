@@ -65,11 +65,13 @@ jobs:
         run: cargo test --locked --all-targets
       - name: Tests (all features)
         run: cargo test --locked --all-targets --all-features
+      - name: Build macOS demo
+        if: runner.os == 'macOS'
+        run: cargo build --locked --features demo
       - name: macOS window smoke test
         if: runner.os == 'macOS'
         timeout-minutes: 3
         run: |
-          cargo build --locked --features demo
           target/debug/zapfast --demo --demo-shot "$RUNNER_TEMP/zapfast-content.png" --demo-shot-delay 8000 &
           demo_pid=$!
           sleep 6

@@ -34,17 +34,40 @@ impl Setup {
     }
 
     pub(super) fn active(&self) -> bool {
-        self.home
-            .join(".local/state/omarchy/current/theme")
-            .is_dir()
-            && self
-                .home
-                .join(".config/omarchy/themed/zapfast.json.tpl")
-                .is_file()
-            && self
-                .home
-                .join(".config/omarchy/hooks/theme-set.d/zapfast-theme")
-                .is_file()
+        self.home.join(".config/omarchy").is_dir() && self.watch_directory().is_dir()
+    }
+
+    pub(super) fn watch_directory(&self) -> PathBuf {
+        self.home.join(".local/state/omarchy/current")
+    }
+
+    /// Following the desktop must also work in Cargo and portable builds,
+    /// before a package has installed its optional template and hook.
+    pub(super) fn current_theme(&self) -> io::Result<super::custom::CustomTheme> {
+        self.current_theme_with(read_colors)
+    }
+
+    fn current_theme_with(
+        &self,
+        colors: impl FnOnce(&Path) -> io::Result<String>,
+    ) -> io::Result<super::custom::CustomTheme> {
+        let current = self.watch_directory().join("theme");
+        let rendered = current.join("zapfast.json");
+        let text = if rendered.is_file() {
+            read_small(&rendered)?
+        } else {
+            let custom = self.home.join(".config/omarchy/themed/zapfast.json.tpl");
+            let template = if custom.is_file() {
+                read_small(&custom)?
+            } else {
+                include_str!("../../contrib/omarchy/zapfast.json.tpl").to_owned()
+            };
+            render_seed(&template, &colors(&current.join("colors.toml"))?)?
+        };
+        Ok(super::custom::CustomTheme {
+            filename: "omarchy.json".into(),
+            palette: super::custom::parse_palette(&text).map_err(io::Error::other)?,
+        })
     }
 
     pub(super) fn install(&self, themes: &Path) -> io::Result<()> {
@@ -75,23 +98,29 @@ impl Setup {
         let palette = if rendered.is_file() {
             read_small(&rendered)?
         } else {
-            let output = Command::new("omarchy-theme-color")
-                .arg("--file")
-                .arg(current.join("colors.toml"))
-                .arg("--all")
-                .stdin(Stdio::null())
-                .output()?;
-            if !output.status.success() || output.stdout.len() > 64 * 1024 {
-                return Err(io::Error::other(
-                    "Omarchy's current colors could not be read",
-                ));
-            }
-            let colors = std::str::from_utf8(&output.stdout).map_err(io::Error::other)?;
-            render_seed(&read_small(&template_path)?, colors)?
+            render_seed(
+                &read_small(&template_path)?,
+                &read_colors(&current.join("colors.toml"))?,
+            )?
         };
         super::custom::parse_palette(&palette).map_err(io::Error::other)?;
         create_only(&destination, palette.as_bytes(), 0o644)
     }
+}
+
+fn read_colors(path: &Path) -> io::Result<String> {
+    let output = Command::new("omarchy-theme-color")
+        .arg("--file")
+        .arg(path)
+        .arg("--all")
+        .stdin(Stdio::null())
+        .output()?;
+    if !output.status.success() || output.stdout.len() > 64 * 1024 {
+        return Err(io::Error::other(
+            "Omarchy's current colors could not be read",
+        ));
+    }
+    String::from_utf8(output.stdout).map_err(io::Error::other)
 }
 
 fn read_small(path: &Path) -> io::Result<String> {
@@ -231,6 +260,52 @@ mod tests {
         assert!(render_seed(TEMPLATE, "mode\tdark\n").is_err());
         assert!(render_seed("{{ missing }}", "").is_err());
         assert!(render_seed("{{", "").is_err());
+    }
+
+    #[test]
+    fn following_omarchy_needs_no_packaged_assets_or_user_hooks() {
+        let directory = tempfile::tempdir().unwrap();
+        let setup = Setup {
+            assets: directory.path().join("missing-package-assets"),
+            home: directory.path().join("home"),
+        };
+        let config = setup.home.join(".config/omarchy");
+        let current = setup.watch_directory().join("theme");
+        fs::create_dir_all(&config).unwrap();
+        fs::create_dir_all(&current).unwrap();
+        assert!(setup.active());
+        assert!(!setup.available());
+        for (colors, expected) in [
+            (
+                include_str!("../../tests/fixtures/omarchy/catppuccin.tsv"),
+                include_str!("../../tests/fixtures/omarchy/catppuccin.json"),
+            ),
+            (
+                include_str!("../../tests/fixtures/omarchy/catppuccin-latte.tsv"),
+                include_str!("../../tests/fixtures/omarchy/catppuccin-latte.json"),
+            ),
+        ] {
+            let theme = setup
+                .current_theme_with(|path| {
+                    assert_eq!(path, current.join("colors.toml"));
+                    Ok(colors.into())
+                })
+                .unwrap();
+            assert_eq!(
+                theme.palette,
+                super::super::custom::parse_palette(expected).unwrap()
+            );
+        }
+        assert_eq!(
+            fs::read_dir(&config).unwrap().count(),
+            0,
+            "following does not install desktop files"
+        );
+        fs::remove_dir(&current).unwrap();
+        assert!(
+            setup.active(),
+            "keep the cached palette while Omarchy replaces its theme directory"
+        );
     }
 
     #[test]

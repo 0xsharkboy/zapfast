@@ -8,6 +8,9 @@ use egui::{Color32, CornerRadius, Response, Sense, Stroke, Vec2};
 pub mod custom;
 #[cfg(target_os = "linux")]
 mod omarchy;
+pub(crate) mod presets;
+#[cfg(target_os = "linux")]
+mod watch;
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Palette {

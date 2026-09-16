@@ -64,7 +64,7 @@ pub(super) fn parse_palette(text: &str) -> Result<Palette, String> {
         ThemeBase::Dark => Palette::dark(),
         ThemeBase::Light => Palette::light(),
     };
-    for (name, value) in file.colors {
+    for (name, value) in &file.colors {
         let hex = value
             .strip_prefix('#')
             .ok_or_else(|| format!("{name}: expected #RRGGBB or #RRGGBBAA"))?;
@@ -106,6 +106,28 @@ pub(super) fn parse_palette(text: &str) -> Result<Palette, String> {
             "read" => palette.read = color,
             _ => return Err(format!("unknown color: {name}")),
         }
+    }
+    // Spotifast palettes share the sixteen interface colours. Derive chat-only
+    // colours when importing one, while keeping explicit ZapFast overrides.
+    if file.colors.contains_key("window") && !file.colors.contains_key("chat") {
+        palette.chat = palette.window;
+    }
+    if file.colors.contains_key("surface") && !file.colors.contains_key("bubble_in") {
+        palette.bubble_in = palette.surface;
+    }
+    if file.colors.contains_key("accent") {
+        if !file.colors.contains_key("bubble_out") {
+            palette.bubble_out = palette.surface.lerp_to_gamma(palette.accent, 0.18);
+        }
+        if !file.colors.contains_key("link") {
+            palette.link = palette.accent;
+        }
+        if !file.colors.contains_key("read") {
+            palette.read = palette.accent;
+        }
+    }
+    if file.colors.contains_key("panel") && !file.colors.contains_key("overlay") {
+        palette.overlay = palette.panel;
     }
     Ok(palette)
 }
@@ -156,6 +178,8 @@ struct Loaded {
     problem: Option<String>,
     follows_omarchy: bool,
     system_theme: Option<CustomTheme>,
+    #[cfg(target_os = "linux")]
+    watch: Option<super::watch::ThemeWatch>,
 }
 
 fn discover(directory: &Path, selected: Option<&str>) -> Loaded {
@@ -236,6 +260,9 @@ pub struct Catalog {
     pending: Option<Scan>,
     follows_omarchy: bool,
     system_theme: Option<CustomTheme>,
+    presets: bool,
+    #[cfg(target_os = "linux")]
+    watch: Option<super::watch::ThemeWatch>,
     #[cfg(target_os = "linux")]
     setup: Option<super::omarchy::Setup>,
     #[cfg(target_os = "linux")]
@@ -243,12 +270,23 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    /// Normal packaged launches may prepare the user's Omarchy integration.
-    /// Demo profiles and ordinary reloads never enable setup themselves.
-    #[cfg(target_os = "linux")]
-    pub fn enable_packaged_omarchy(&mut self) {
-        self.setup = super::omarchy::Setup::discover();
-        self.setup_pending = true;
+    /// Normal launches load the bundled palettes and the active desktop theme.
+    /// Demo profiles remain isolated from the desktop and its files.
+    pub fn enable_desktop_themes(&mut self) {
+        self.presets = true;
+        #[cfg(target_os = "linux")]
+        {
+            self.setup = super::omarchy::Setup::discover();
+            self.setup_pending = true;
+        }
+    }
+
+    pub fn needs_reload(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        if let Some(watch) = &self.watch {
+            return watch.take_changed();
+        }
+        false
     }
 
     pub fn start(
@@ -270,11 +308,15 @@ impl Catalog {
     }
 
     fn scan(&mut self, scan: Scan) {
+        let presets = self.presets;
+        #[cfg(target_os = "linux")]
+        let needs_watch = presets && self.watch.is_none();
         #[cfg(target_os = "linux")]
         let setup = self.setup.clone();
         #[cfg(target_os = "linux")]
         let install = std::mem::take(&mut self.setup_pending);
-        self.spawn(&scan.waker, move || {
+        let waker = scan.waker.clone();
+        self.spawn(&waker, move || {
             #[cfg(target_os = "linux")]
             if install
                 && let Some(setup) = &setup
@@ -282,14 +324,67 @@ impl Catalog {
             {
                 log::warn!("unable to prepare the optional Omarchy theme: {error}");
             }
-            let loaded = discover(&scan.directory, scan.selected.as_deref());
+            let selected_file = scan.selected.as_deref().filter(|filename| {
+                !presets || !super::presets::contains(filename) || scan.directory.join(filename).exists()
+            });
+            let mut loaded = discover(&scan.directory, selected_file);
+            if presets {
+                for theme in super::presets::themes() {
+                    if selected_file == Some(theme.filename.as_str()) && scan.directory.join(&theme.filename).exists()
+                        && !loaded.themes.iter().any(|local| local.filename == theme.filename) {
+                        // A broken user override keeps the cached selection; it
+                        // must not silently turn back into the bundled default.
+                        continue;
+                    }
+                    if !loaded
+                        .themes
+                        .iter()
+                        .any(|local| local.filename == theme.filename)
+                    {
+                        loaded.themes.push(theme);
+                    }
+                }
+                loaded.themes.sort_by(|a, b| a.filename.cmp(&b.filename));
+            }
             #[cfg(target_os = "linux")]
             let loaded = {
                 let mut loaded = loaded;
-                if setup.as_ref().is_some_and(|setup| setup.active()) {
-                    loaded.follows_omarchy = true;
-                    loaded.system_theme = read_theme(&scan.directory, "omarchy.json").ok();
+                if needs_watch {
+                    let system = setup
+                        .as_ref()
+                        .filter(|setup| setup.active())
+                        .map(|setup| setup.watch_directory());
+                    let watch = std::fs::create_dir_all(&scan.directory)
+                        .map_err(notify::Error::io)
+                        .and_then(|()| {
+                            super::watch::ThemeWatch::new(
+                                &scan.directory,
+                                system.as_deref(),
+                                &scan.waker,
+                            )
+                        });
+                    match watch {
+                        Ok(watch) => loaded.watch = Some(watch),
+                        Err(error) => log::warn!("unable to watch theme changes: {error}"),
+                    }
                 }
+                if let Some(setup) = &setup
+                    && setup.active()
+                {
+                    loaded.follows_omarchy = true;
+                    match setup.current_theme() {
+                        Ok(theme) => {
+                            loaded.themes.retain(|old| old.filename != "omarchy.json");
+                            loaded.themes.push(theme.clone());
+                            loaded.system_theme = Some(theme);
+                        }
+                        Err(error) => {
+                            log::warn!("unable to read the current Omarchy palette: {error}");
+                            loaded.problem.get_or_insert_with(|| "The Omarchy palette could not be loaded. Keeping the last usable appearance. See the log for details.".into());
+                        }
+                    }
+                }
+
                 loaded
             };
             loaded
@@ -387,6 +482,10 @@ impl Catalog {
                 self.problem = loaded.problem;
                 self.follows_omarchy = loaded.follows_omarchy;
                 self.system_theme = loaded.system_theme;
+                #[cfg(target_os = "linux")]
+                if loaded.watch.is_some() {
+                    self.watch = loaded.watch;
+                }
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.problem = Some(
@@ -446,6 +545,43 @@ impl Catalog {
 
 #[cfg(test)]
 mod custom_theme_tests {
+    #[test]
+    fn bundled_choices_are_available_without_local_files_and_valid_overrides_win() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("Nord.json"),
+            r##"{"base":"light","colors":{"accent":"#102030"}}"##,
+        )
+        .unwrap();
+        let mut catalog = super::Catalog {
+            presets: true,
+            ..Default::default()
+        };
+        catalog.start(
+            directory.path().into(),
+            Some("Nord.json".into()),
+            &Default::default(),
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while !catalog.poll() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(catalog.themes().len(), 5);
+        let nord = catalog.find("Nord.json").unwrap();
+        assert!(!nord.palette.dark);
+        assert_eq!(
+            nord.palette.accent,
+            egui::Color32::from_rgb(0x10, 0x20, 0x30)
+        );
+        assert!(catalog.find("Tokyo Night.json").is_some());
+        assert_eq!(
+            std::fs::read_dir(directory.path()).unwrap().count(),
+            1,
+            "bundled defaults do not replace or create user palette files"
+        );
+    }
+
     #[test]
     fn picker_places_live_omarchy_first_only_when_the_integration_is_available() {
         for available in [false, true] {

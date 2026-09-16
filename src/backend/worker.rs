@@ -31,7 +31,7 @@ use whatsapp_rust::wacore_binary::jid::JidExt;
 use whatsapp_rust::waproto::buffa::Message as _;
 use whatsapp_rust::{MediaRetryResult, MediaReuploadRequest};
 
-use super::{Command, Event, LinkStatus, Waker};
+use super::{Command, Event, LinkStatus, Waker, read_sync::ReadSync};
 use crate::app::PAGE;
 use crate::archive::Archive;
 use crate::model::{
@@ -205,7 +205,7 @@ pub async fn run(
         pending_avatars: HashMap::new(),
         sticker_fetches: HashSet::new(),
         sticker_downloads: HashSet::new(),
-        read_syncs: HashMap::new(),
+        read_sync: ReadSync::default(),
     };
     worker.load_state();
     worker.backfill();
@@ -245,8 +245,7 @@ pub async fn run(
 }
 
 struct Worker {
-    /// None while in flight, otherwise the next retry time.
-    read_syncs: HashMap<ChatId, Option<Instant>>,
+    read_sync: ReadSync,
     dirs: AppDirs,
     events: std::sync::mpsc::Sender<Event>,
     commands: mpsc::UnboundedSender<Command>,
@@ -1234,7 +1233,7 @@ impl Worker {
         self.group_info_tries.clear();
         self.group_info_retry.clear();
         self.presence_subscribed.clear();
-        self.read_syncs.clear();
+        self.read_sync = ReadSync::default();
         self.pending_older.clear();
         self.pending_avatars.clear();
         self.me_pn = None;
@@ -2058,13 +2057,15 @@ impl Worker {
                 through,
                 success,
             } => {
+                if !self
+                    .read_sync
+                    .finish(&chat, through, success, Instant::now())
+                {
+                    return;
+                }
                 if success {
                     let _ = self.archive.finish_read_sync(&chat, through);
-                    self.read_syncs.remove(&chat);
                     self.pump_read_sync();
-                } else {
-                    self.read_syncs
-                        .insert(chat, Some(Instant::now() + Duration::from_secs(30)));
                 }
             }
             Command::LoadChat { chat, before } => self.load_chat(chat, before),
@@ -2762,24 +2763,19 @@ impl Worker {
     }
 
     fn pump_read_sync(&mut self) {
-        if !matches!(self.status, LinkStatus::Connected) {
+        if !matches!(self.status, LinkStatus::Connected) || !self.read_sync.ready(Instant::now()) {
             return;
         }
         let Some(client) = self.client.clone() else {
             return;
         };
         for (chat, through) in self.archive.pending_reads().unwrap_or_default() {
-            if self
-                .read_syncs
-                .get(&chat)
-                .is_some_and(|retry| retry.is_none_or(|retry| retry > Instant::now()))
-            {
-                continue;
-            }
             let Some(jid) = Self::jid_of(&chat) else {
                 continue;
             };
-            self.read_syncs.insert(chat.clone(), None);
+            if !self.read_sync.start(&chat, through, Instant::now()) {
+                break;
+            }
             let client = client.clone();
             let commands = self.commands.clone();
             tokio::spawn(async move {
@@ -2800,6 +2796,9 @@ impl Worker {
                     success: result.is_ok(),
                 });
             });
+            // Every read-state write uses regular_low. A queue of spawned tasks
+            // would each retry the same broken collection before we can back off.
+            break;
         }
     }
 
@@ -5392,7 +5391,7 @@ mod receipt_tests {
             pending_avatars: HashMap::new(),
             sticker_fetches: HashSet::new(),
             sticker_downloads: HashSet::new(),
-            read_syncs: HashMap::new(),
+            read_sync: ReadSync::default(),
         };
         (worker, events_rx, inbox, wa_events)
     }
@@ -5646,6 +5645,8 @@ mod receipt_tests {
         let (mut worker, _events, _inbox, _wa) = worker();
         worker.store_message(incoming("a", 100), None, None);
         worker.mark_read(PEER.into(), false);
+        let now = Instant::now();
+        assert!(worker.read_sync.start(PEER, 100, now));
         worker
             .handle_command(Command::ReadSyncFinished {
                 chat: PEER.into(),
@@ -5657,7 +5658,16 @@ mod receipt_tests {
             worker.archive.pending_reads().unwrap(),
             vec![(PEER.into(), 100)]
         );
-        assert!(worker.read_syncs[PEER].is_some_and(|retry| retry > Instant::now()));
+        assert!(!worker.read_sync.ready(Instant::now()));
+        assert!(!worker.read_sync.start("another-chat", 200, Instant::now()));
+        // A new local read stays queued while the shared collection backs off.
+        worker.store_message(incoming("b", 200), None, None);
+        worker.mark_read(PEER.into(), false);
+        assert!(
+            worker
+                .read_sync
+                .start(PEER, 100, now + Duration::from_secs(31))
+        );
         worker
             .handle_command(Command::ReadSyncFinished {
                 chat: PEER.into(),
@@ -5665,8 +5675,20 @@ mod receipt_tests {
                 success: true,
             })
             .await;
+        assert_eq!(
+            worker.archive.pending_reads().unwrap(),
+            vec![(PEER.into(), 200)]
+        );
+        assert!(worker.read_sync.start(PEER, 200, Instant::now()));
+        worker
+            .handle_command(Command::ReadSyncFinished {
+                chat: PEER.into(),
+                through: 200,
+                success: true,
+            })
+            .await;
         assert!(worker.archive.pending_reads().unwrap().is_empty());
-        assert!(!worker.read_syncs.contains_key(PEER));
+        assert!(worker.read_sync.ready(Instant::now()));
     }
 
     #[test]

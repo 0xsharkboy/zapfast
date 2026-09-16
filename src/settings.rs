@@ -14,7 +14,7 @@ pub enum ThemeChoice {
 }
 
 impl ThemeChoice {
-    pub const ALL: [ThemeChoice; 3] = [Self::Dark, Self::Light, Self::System];
+    pub const ALL: [ThemeChoice; 3] = [Self::System, Self::Light, Self::Dark];
 
     pub fn label(self) -> &'static str {
         match self {

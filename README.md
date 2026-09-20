@@ -51,6 +51,9 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
   Color Emoji on macOS and Windows. On Linux, ZapFast prefers an installed
   Noto Color Emoji and falls back to the bundled copy. Emoji-only messages
   are larger.
+- **Safer desktop opening.** Links open only web pages or email addresses.
+  Common documents and media open in their default apps; executable, script,
+  and unrecognized attachment formats open their containing folder instead.
 - **Send attachments with captions.** Paste a picture, drop files, or use the
   file picker. They stay in the composer until you send them or press Escape.
 - **Mute chats** for eight hours, one week, or indefinitely. The setting also
@@ -261,6 +264,10 @@ word). Open Settings from the gear or
 with `Ctrl+,`. Use the pencil to message a new number or save a contact. You
 can also open a group member's contact card. Saved names sync through WhatsApp
 to your phone and linked devices.
+
+Protocol logs omit private payloads and raw error details, including verbose
+logging. Panic logs record the source location without the panic payload.
+Pairing signature failures and rate limits retain a diagnostic category.
 
 The protocol dependency includes the upstream WhatsApp Business pairing fix.
 Device-store migration waits until an updated window is acknowledged, preserving

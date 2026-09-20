@@ -406,10 +406,9 @@ impl Worker {
         let (Some(client), Some(jid)) = (self.client.clone(), Self::jid_of(chat)) else {
             return;
         };
-        let chat = chat.to_owned();
         tokio::spawn(async move {
-            if let Err(error) = call(client, jid).await {
-                log::warn!("the phone was not told about {chat}: {error}");
+            if call(client, jid).await.is_err() {
+                log::warn!("could not synchronize a chat preference");
             }
         });
     }
@@ -846,11 +845,11 @@ impl Worker {
             }
             Ok(None) => {
                 let name = self.chat_name(id, push_name);
-                if let Err(error) = self.archive.ensure_chat(id, &name) {
-                    log::warn!("could not create chat {id}: {error}");
+                if self.archive.ensure_chat(id, &name).is_err() {
+                    log::warn!("could not create a chat");
                 }
             }
-            Err(error) => log::warn!("could not read chat {id}: {error}"),
+            Err(_error) => log::warn!("could not read a chat"),
         }
         if ChatKind::from_id(id) == ChatKind::Group {
             self.request_group_info(id, false);
@@ -995,7 +994,7 @@ impl Worker {
                     let permanent = ["item-not-found", "forbidden", "not-authorized"]
                         .iter()
                         .any(|word| text.contains(word));
-                    log::warn!("no metadata for {chat}: {text}");
+                    log::warn!("could not fetch group metadata");
                     let _ = commands.send(Command::GroupInfoFailed { chat, permanent });
                 }
             }
@@ -1468,7 +1467,7 @@ impl Worker {
                     self.emit_message(&chat, id);
                 }
                 Ok(false) => {}
-                Err(error) => log::warn!("could not file a receipt for {id}: {error}"),
+                Err(_error) => log::warn!("could not file a receipt"),
             }
             if let Ok(Some(message)) = self.archive.message(&chat, id) {
                 newest = newest.max(message.timestamp);
@@ -2042,12 +2041,12 @@ impl Worker {
                 }
             }
             Ok(Err(error)) => {
-                log::warn!("a history chunk could not be read: {error}");
+                log::warn!("a history chunk could not be read");
                 self.emit(Event::Error(format!(
                     "Could not read part of the chat history: {error}"
                 )));
             }
-            Err(error) => log::warn!("history parsing panicked: {error}"),
+            Err(_error) => log::warn!("history parsing worker failed"),
         }
         if !on_demand && lazy.progress().is_some_and(|progress| progress >= 100) {
             self.sync_deadline = Some(Instant::now() + Duration::from_secs(3));
@@ -2080,13 +2079,13 @@ impl Worker {
             ) else {
                 continue;
             };
-            if let Err(error) = self.archive.upsert_phone_sticker(
+            if let Err(_error) = self.archive.upsert_phone_sticker(
                 &hash,
                 &sticker.encode_to_vec(),
                 seconds(sticker.last_sticker_sent_ts.unwrap_or(0)),
                 sticker.weight.unwrap_or(0.0),
             ) {
-                log::warn!("could not store sticker {hash}: {error}");
+                log::warn!("could not store a sticker");
             }
         }
         for chat in &parsed.chats {
@@ -2145,8 +2144,8 @@ impl Worker {
                 row.muted_until = chat
                     .muted_until
                     .unwrap_or_else(|| existing.as_ref().and_then(|row| row.muted_until));
-                if let Err(error) = self.archive.upsert_chat(&row) {
-                    log::warn!("could not store chat {id}: {error}");
+                if self.archive.upsert_chat(&row).is_err() {
+                    log::warn!("could not store a chat");
                     continue;
                 }
             }
@@ -2386,7 +2385,7 @@ impl Worker {
                 .fetch_message_history(&jid, &id, from_me, timestamp, PHONE_BATCH)
                 .await
             {
-                log::warn!("older messages not requested: {error}");
+                log::warn!("could not request older messages");
                 let _ = commands.send(Command::OlderFailed {
                     chat: chat.clone(),
                     error: format!("Could not request older messages from your phone: {error}"),
@@ -2787,11 +2786,11 @@ impl Worker {
                 self.sticker_fetches.remove(&hash);
                 match result {
                     Ok(path) => {
-                        if let Err(error) = self.archive.set_sticker_path(&hash, &path) {
-                            log::warn!("could not file sticker {hash}: {error}");
+                        if self.archive.set_sticker_path(&hash, &path).is_err() {
+                            log::warn!("could not file a sticker");
                         }
                     }
-                    Err(error) => log::warn!("sticker {hash} could not be fetched: {error}"),
+                    Err(_error) => log::warn!("could not fetch a sticker"),
                 }
                 self.emit_stickers();
             }
@@ -3472,8 +3471,8 @@ impl Worker {
                                 Ok(_) => {
                                     Err("No longer available on WhatsApp's servers".to_owned())
                                 }
-                                Err(error) => {
-                                    log::info!("media re-upload was not granted: {error}");
+                                Err(_error) => {
+                                    log::info!("media re-upload was not granted");
                                     Err("No longer available on WhatsApp's servers".to_owned())
                                 }
                             }
@@ -4244,8 +4243,8 @@ impl Worker {
             participant: (jid.is_group() && !target.from_me).then(|| target.sender.clone()),
         };
         tokio::spawn(async move {
-            if let Err(error) = client.send_reaction(jid, key, &emoji).await {
-                log::warn!("reaction not sent: {error}");
+            if client.send_reaction(jid, key, &emoji).await.is_err() {
+                log::warn!("could not send a reaction");
             }
         });
     }
@@ -4415,7 +4414,10 @@ fn extension_for(mime: &str, file_name: Option<&str>) -> String {
         "text/plain" => "txt",
         _ => mime.rsplit('/').next().unwrap_or("bin"),
     }
-    .to_owned()
+    .chars()
+    .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+    .take(16)
+    .collect::<String>()
 }
 
 fn media_path(dir: &Path, chat: &str, id: &str, mime: &str, file_name: Option<&str>) -> PathBuf {
@@ -4562,12 +4564,9 @@ fn classify(base: &wa::Message) -> Option<Content> {
             if title.is_none() && description.is_none() && !has_picture {
                 return None;
             }
-            let url = non_empty(&extended.matched_text).or_else(|| first_link(text))?;
-            let url = if url.contains("://") {
-                url
-            } else {
-                format!("https://{url}")
-            };
+            let url = non_empty(&extended.matched_text)
+                .and_then(|url| crate::safety::preview_url(&url))
+                .or_else(|| first_link(text).and_then(|url| crate::safety::preview_url(&url)))?;
             Some(LinkPreview {
                 url,
                 title,
@@ -5567,6 +5566,23 @@ mod tests {
         }
         assert_eq!(thumbnail_of(&image), Some(vec![0xff, 0xd8]));
         assert_eq!(classify(&wa::Message::default()), None);
+    }
+
+    #[test]
+    fn unsafe_preview_metadata_cannot_launch_a_desktop_handler() {
+        let message = wa::Message {
+            extended_text_message: MessageField::some(wa::message::ExtendedTextMessage {
+                text: Some("Read this".into()),
+                matched_text: Some("file:///fixture.exe".into()),
+                title: Some("An ordinary title".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(matches!(
+            classify(&message),
+            Some(Content::Text { preview: None, .. })
+        ));
     }
 
     #[test]

@@ -1324,7 +1324,7 @@ impl App {
                 } else {
                     error
                 };
-                log::warn!("download failed: {notice}");
+                log::warn!("attachment download failed; details are shown in the bubble");
                 media.state = MediaState::Failed(notice);
             }
         }
@@ -1947,11 +1947,33 @@ impl App {
                 self.backend.send(Command::Download { chat, message });
             }
             Action::OpenFile(path) => {
-                if let Err(error) = open::that_detached(&path) {
-                    self.toast_error(format!("Could not open {}: {error}", path.display()));
+                if crate::safety::can_open_attachment(&path) && path.is_file() {
+                    if let Err(error) = open::that_detached(&path) {
+                        self.toast_error(format!("Could not open the attachment: {error}"));
+                    }
+                } else {
+                    self.toast("For safety, open this file yourself from its folder");
+                    if let Some(folder) = path.parent() {
+                        self.actions.push(Action::OpenFolder(folder.to_owned()));
+                    }
                 }
             }
-            Action::OpenUrl(url) => ctx.open_url(egui::OpenUrl::new_tab(url)),
+            Action::OpenFolder(path) => {
+                if path.is_dir() {
+                    if let Err(error) = open::that_detached(&path) {
+                        self.toast_error(format!("Could not open the folder: {error}"));
+                    }
+                } else {
+                    self.toast_error("The folder is unavailable");
+                }
+            }
+            Action::OpenUrl(url) => {
+                if let Some(url) = crate::safety::external_url(&url) {
+                    ctx.open_url(egui::OpenUrl::new_tab(url));
+                } else {
+                    self.toast_error("This link type cannot be opened from ZapFast");
+                }
+            }
             Action::CopyText(text) => {
                 ctx.copy_text(text);
                 self.toast("Copied");
@@ -2493,7 +2515,7 @@ impl App {
 
     pub fn toast_error(&mut self, message: impl Into<String>) {
         let message = message.into();
-        log::warn!("{message}");
+        log::warn!("an operation failed; details are shown in the window");
         self.toasts.push(Toast {
             message,
             kind: ToastKind::Error,
@@ -3356,6 +3378,32 @@ mod tests {
         app.apply(Action::KeepUnread("2@s.whatsapp.net".into()), &ctx);
         app.apply(Action::SetChatFilter(ChatFilter::Unread), &ctx);
         assert!(app.visible_chats().is_empty());
+    }
+
+    #[test]
+    fn desktop_handlers_are_validated_even_for_archived_urls() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(Default::default(), |_| {
+            app.apply(Action::OpenUrl("file:///fixture.exe".into()), &ctx);
+            app.apply(
+                Action::OpenFile(PathBuf::from("/fixture/program.exe")),
+                &ctx,
+            );
+        });
+        output.textures_delta.clear();
+        assert!(
+            output
+                .platform_output
+                .commands
+                .iter()
+                .all(|command| !matches!(command, egui::OutputCommand::OpenUrl(_)))
+        );
+        assert!(
+            app.actions
+                .iter()
+                .any(|action| matches!(action, Action::OpenFolder(_)))
+        );
     }
 
     #[test]

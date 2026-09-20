@@ -137,6 +137,25 @@ fn main() -> eframe::Result<()> {
             Err(error) => eprintln!("not keeping a log file: {error}"),
         }
     }
+    logger.format(|buffer, record| {
+        use std::io::Write;
+        let message = record.args().to_string();
+        let message = if zapfast::diagnostics::is_protocol_target(record.target())
+            || zapfast::diagnostics::is_protocol_target(record.module_path().unwrap_or_default())
+        {
+            zapfast::diagnostics::protocol_summary(&message)
+        } else {
+            &message
+        };
+        writeln!(
+            buffer,
+            "[{} {} {}] {}",
+            buffer.timestamp(),
+            record.level(),
+            record.target(),
+            message
+        )
+    });
     logger.init();
     log_panics(dirs.panic_log());
     let settings = settings::Settings::load(&dirs.settings_file());
@@ -281,16 +300,19 @@ impl std::io::Write for Tee {
 
 /// Writes panics to `path` before process exit.
 fn log_panics(path: std::path::PathBuf) {
-    let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        previous(info);
         let thread = std::thread::current();
         let entry = format!(
-            "{} zapfast {} on thread {:?}: {info}\n",
+            "{} zapfast {} on thread {:?}, panic at {} (payload omitted)\n",
             jiff::Timestamp::now(),
             env!("CARGO_PKG_VERSION"),
             thread.name().unwrap_or("unnamed"),
+            info.location().map_or_else(
+                || "unknown location".to_owned(),
+                |location| location.to_string()
+            ),
         );
+        eprint!("{entry}");
         let file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)

@@ -2356,7 +2356,7 @@ fn context_menu(ui: &mut egui::Ui, view: &View<'_>, message: &Message, actions: 
                 if let Some(folder) = path.parent()
                     && widgets::menu_item(ui, &palette, Some(Icon::FileText), "Show in folder")
                 {
-                    actions.push(Action::OpenFile(folder.to_path_buf()));
+                    actions.push(Action::OpenFolder(folder.to_path_buf()));
                 }
             }
             None => {

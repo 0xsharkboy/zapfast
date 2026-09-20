@@ -186,7 +186,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                         &archive.display().to_string(),
                         |ui| {
                             if theme::soft_button(ui, &palette, Some(Icon::ExternalLink), "Open folder", false).clicked() {
-                                app.actions.push(Action::OpenFile(app.dirs.state.clone()));
+                                app.actions.push(Action::OpenFolder(app.dirs.state.clone()));
                             }
                         },
                     );
@@ -199,7 +199,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                         |ui| {
                             if theme::soft_button(ui, &palette, Some(Icon::ExternalLink), "Open folder", false).clicked() {
                                 let _ = std::fs::create_dir_all(&media);
-                                app.actions.push(Action::OpenFile(media.clone()));
+                                app.actions.push(Action::OpenFolder(media.clone()));
                             }
                         },
                     );

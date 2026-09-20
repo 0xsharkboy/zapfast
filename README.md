@@ -262,6 +262,10 @@ with `Ctrl+,`. Use the pencil to message a new number or save a contact. You
 can also open a group member's contact card. Saved names sync through WhatsApp
 to your phone and linked devices.
 
+The protocol dependency includes the upstream WhatsApp Business pairing fix.
+Device-store migration waits until an updated window is acknowledged, preserving
+startup rollback; an unused legacy column is retained for 0.14 compatibility.
+
 ## Files
 
 | What | Linux | Notes |

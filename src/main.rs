@@ -449,12 +449,19 @@ impl eframe::App for Shell {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if let Some(app) = self.app.as_mut() {
             app.frame_ui(ui);
+            let startup = app.backend.take_startup();
             if let Some(receipt) = self.update_receipt.take() {
                 std::thread::spawn(move || {
                     if let Err(error) = zapfast::updates::install::acknowledge(&receipt) {
                         log::warn!("could not acknowledge the update: {error:#}");
+                        return;
+                    }
+                    if let Some(startup) = startup {
+                        let _ = startup.send(());
                     }
                 });
+            } else if let Some(startup) = startup {
+                let _ = startup.send(());
             }
             #[cfg(feature = "demo")]
             if let Some(tour) = self.tour.as_mut() {

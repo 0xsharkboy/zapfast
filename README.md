@@ -51,6 +51,10 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
   Color Emoji on macOS and Windows. On Linux, ZapFast prefers an installed
   Noto Color Emoji and falls back to the bundled copy. Emoji-only messages
   are larger.
+- **Screen-reader access.** AccessKit exposes the interface to desktop
+  accessibility services. Custom buttons, chat rows, settings switches and
+  message text include readable labels. Windows NVDA navigation still needs
+  platform verification; keyboard and screen-reader support is not complete.
 - **Safer desktop opening.** Links open only web pages or email addresses.
   Common documents and media open in their default apps; executable, script,
   and unrecognized attachment formats open their containing folder instead.

@@ -37,7 +37,7 @@ log = "0.4"
 env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
 directories = "6"
 # UI framework. glow avoids the larger wgpu dependency.
-eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts", "links", "wayland", "x11", "persistence"] }
+eframe = { version = "0.36", default-features = false, features = ["accesskit", "glow", "default_fonts", "links", "wayland", "x11", "persistence"] }
 egui = "0.36"
 egui_extras = { version = "0.36", features = ["file", "image", "svg", "webp", "gif"] }
 # Finds system fonts for scripts not covered by Inter. Keep skrifa aligned with

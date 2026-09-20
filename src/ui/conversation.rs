@@ -916,6 +916,7 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                                     crate::emoji::paint_cluster(ui, cluster, rect);
                                 }
                                 let response = &output.response.response;
+                                ui.ctx().accesskit_node_builder(response.id, |node| node.set_label("Message"));
                                 if response.changed() {
                                     app.actions.push(Action::Composing {
                                         chat: chat.id.clone(),

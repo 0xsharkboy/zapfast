@@ -1345,6 +1345,62 @@ mod tests {
     }
 
     #[test]
+    fn custom_controls_and_messages_expose_accessible_labels() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        crate::theme::install(&ctx);
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let palette = crate::theme::Palette::dark();
+            crate::theme::icon_button(
+                ui,
+                crate::theme::Icon::Send,
+                20.0,
+                palette.text,
+                palette.accent,
+                "Send message",
+            );
+            crate::ui::widgets::rich_text(
+                ui,
+                "Fixture hello 🙂",
+                crate::theme::regular(14.0),
+                palette.text,
+            );
+            let text = crate::markup::layout(
+                ui,
+                "*Fixture body* 🙂",
+                &[],
+                &crate::markup::Style {
+                    size: 14.0,
+                    color: palette.text,
+                    secondary: palette.secondary,
+                    link: palette.accent,
+                    mention: palette.accent,
+                },
+                300.0,
+            );
+            let (rect, response) =
+                ui.allocate_exact_size(text.galley.size(), egui::Sense::click_and_drag());
+            crate::markup::paint_selectable(ui, &text, &response, rect.min, palette.text, true);
+        });
+        output.textures_delta.clear();
+        let tree = output
+            .platform_output
+            .accesskit_update
+            .expect("accessibility tree");
+        let labels: Vec<_> = tree
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.label().or_else(|| node.value()))
+            .collect();
+        for expected in ["Send message", "Fixture hello 🙂", "Fixture body 🙂"] {
+            assert!(
+                labels.contains(&expected),
+                "missing accessible label: {expected}"
+            );
+        }
+    }
+
+    #[test]
     fn every_surface_lays_out() {
         let mut app = app();
         let ctx = egui::Context::default();

@@ -254,7 +254,11 @@ fn toggle(
     let mut value = *field(&mut app.settings);
     let mut changed = false;
     widgets::setting_row(ui, &palette, label, description, |ui| {
-        changed = widgets::switch(ui, &palette, &mut value).changed();
+        let response = widgets::switch(ui, &palette, &mut value);
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), value, label)
+        });
+        changed = response.changed();
     });
     if changed {
         *field(&mut app.settings) = value;

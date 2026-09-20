@@ -706,7 +706,13 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                 .inner_margin(Margin::symmetric(12, 8)),
         )
         .show(ui, |ui| {
-            if chat.read_only {
+            if !chat.can_send() {
+                if chat.kind == crate::model::ChatKind::Broadcast {
+                    ui.vertical_centered(|ui| {
+                        theme::text(ui, "Channels are read-only in ZapFast", theme::regular(13.5), palette.secondary);
+                    });
+                    return;
+                }
                 ui.vertical_centered(|ui| {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {

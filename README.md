@@ -31,6 +31,7 @@ See **[zapfast.rocks](https://zapfast.rocks)** for downloads and guides.
   new messages. Chat and contact name searches ignore accents, so `Angel`
   finds `Ángel`.
   Typing indicators show other participants, excluding your own linked devices.
+  Newsletter channels are read-only; publishing channel posts is not supported.
 - **Read state across devices.** Reading a chat syncs its unread badge with
   your phone and other linked devices, including when read receipts are off.
   Replies from another device clear preceding unread messages. The read-receipt
@@ -284,7 +285,8 @@ Protocol logs omit private payloads and raw error details, including verbose
 logging. Panic logs record the source location without the panic payload.
 Pairing signature failures and rate limits retain a diagnostic category.
 
-An offline preview uses `--demo --demo-page locked`.
+Offline previews for these states use `--demo --demo-page channel` and
+`--demo --demo-page locked`.
 
 The protocol dependency includes the upstream WhatsApp Business pairing fix.
 Device-store migration waits until an updated window is acknowledged, preserving

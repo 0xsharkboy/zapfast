@@ -2498,6 +2498,37 @@ impl Worker {
     // --- commands --------------------------------------------------------
 
     async fn handle_command(&mut self, command: Command) {
+        let destination = match &command {
+            Command::SendText { chat, .. }
+            | Command::SendVoice { chat, .. }
+            | Command::SendFiles { chat, .. }
+            | Command::SendImage { chat, .. }
+            | Command::SendSticker { chat, .. }
+            | Command::SendGif { chat, .. }
+            | Command::CreatePoll { chat, .. } => Some(chat),
+            Command::Forward { to_chat, .. } => Some(to_chat),
+            _ => None,
+        };
+        if let Some(chat) = destination {
+            let writable = self.privacy_ready
+                && match self.archive.chat(chat) {
+                    Ok(Some(chat)) => chat.can_send(),
+                    Ok(None) => ChatKind::from_id(chat) != ChatKind::Broadcast,
+                    Err(_) => false,
+                };
+            if !writable {
+                let error = "This conversation is read-only in ZapFast".to_owned();
+                if matches!(&command, Command::CreatePoll { .. }) {
+                    self.emit(Event::PollCreated {
+                        chat: chat.clone(),
+                        error: Some(error),
+                    });
+                } else {
+                    self.emit(Event::Error(error));
+                }
+                return;
+            }
+        }
         match command {
             Command::RefreshPoll { chat, message } => self.refresh_poll(chat, message),
             Command::PollHistoryFailed {
@@ -5685,6 +5716,20 @@ mod tests {
             classify(&message),
             Some(Content::Text { preview: None, .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn newsletter_sends_are_rejected_before_reaching_the_client() {
+        let (mut worker, events, _, _) = receipt_tests::worker();
+        worker
+            .handle_command(Command::SendText {
+                chat: "fixture@newsletter".into(),
+                text: "Fixture".into(),
+                quoting: None,
+                mentions: Vec::new(),
+            })
+            .await;
+        assert!(matches!(events.try_recv().unwrap(), Event::Error(_)));
     }
 
     #[test]

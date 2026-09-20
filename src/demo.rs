@@ -822,6 +822,20 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
         match part {
             "chat" | "" => {}
             "empty" => app.open_chat = None,
+            "channel" => {
+                let id = "fixture@newsletter";
+                let mut chat = Chat::new(id.into(), "Demo announcements".into());
+                chat.last_activity = crate::util::now();
+                app.chats.insert(0, chat);
+                app.conversations.entry(id.into()).or_default().messages = vec![message(
+                    id,
+                    "channel-fixture",
+                    false,
+                    crate::util::now(),
+                    Content::text("A synthetic announcement from a read-only channel."),
+                )];
+                app.open_chat = Some(id.into());
+            }
             "locked" => {
                 app.chats[0].locked = true;
                 app.open_chat = None;
@@ -1411,6 +1425,7 @@ mod tests {
             render(&mut app, &ctx);
         }
         for page in [
+            "channel",
             "locked",
             "empty",
             "rtl",

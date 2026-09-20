@@ -121,6 +121,11 @@ impl Chat {
         }
     }
 
+    /// Newsletter publishing permissions are not supported by this client.
+    pub fn can_send(&self) -> bool {
+        !self.locked && !self.read_only && self.kind != ChatKind::Broadcast
+    }
+
     pub fn is_group(&self) -> bool {
         self.kind == ChatKind::Group
     }

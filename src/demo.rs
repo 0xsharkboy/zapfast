@@ -822,6 +822,10 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
         match part {
             "chat" | "" => {}
             "empty" => app.open_chat = None,
+            "locked" => {
+                app.chats[0].locked = true;
+                app.open_chat = None;
+            }
             "disappearing" => {
                 let chat = app
                     .chats
@@ -1351,6 +1355,7 @@ mod tests {
             render(&mut app, &ctx);
         }
         for page in [
+            "locked",
             "empty",
             "rtl",
             "disappearing",

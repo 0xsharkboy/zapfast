@@ -180,7 +180,17 @@ pub async fn run(
         }
     };
     let (wa_sender, wa_events) = mpsc::unbounded_channel();
+    let privacy_ready = archive
+        .meta("chat_privacy_ready_v1")
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("complete");
     let mut worker = Worker {
+        privacy_ready,
+        privacy_recovering: false,
+        privacy_generation: 0,
+        privacy_retry: Instant::now(),
         dirs,
         events,
         commands,
@@ -231,7 +241,12 @@ pub async fn run(
                     Some(command) => worker.handle_command(command).await,
                 }
             }
-            Some(event) = wa_events.recv() => worker.handle_wa_event(event).await,
+            Some(event) = wa_events.recv() => match event {
+                RuntimeEvent::WhatsApp(event) => worker.handle_wa_event(event).await,
+                RuntimeEvent::PreferencesRecovered { generation, success } => {
+                    worker.preferences_recovered(generation, success);
+                }
+            },
             _ = async {
                 match deadline {
                     Some(deadline) => tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await,
@@ -243,6 +258,7 @@ pub async fn run(
                 worker.emit_chats();
             }
             _ = tick.tick() => {
+                worker.refresh_legacy_preferences();
                 worker.expire_older_requests();
                 worker.retry_avatars();
                 worker.pump_group_info();
@@ -255,7 +271,24 @@ pub async fn run(
     worker.stop_bot().await;
 }
 
+enum RuntimeEvent {
+    WhatsApp(Arc<wa_events::Event>),
+    PreferencesRecovered { generation: u64, success: bool },
+}
+
+struct UiEvents(mpsc::UnboundedSender<RuntimeEvent>);
+
+impl wa_events::EventHandler for UiEvents {
+    fn handle_event(&self, event: Arc<wa_events::Event>) {
+        let _ = self.0.send(RuntimeEvent::WhatsApp(event));
+    }
+}
+
 struct Worker {
+    privacy_ready: bool,
+    privacy_recovering: bool,
+    privacy_generation: u64,
+    privacy_retry: Instant,
     read_sync: ReadSync,
     poll_decrypting: usize,
     poll_history: poll_history::Requests,
@@ -267,7 +300,7 @@ struct Worker {
     archive: Archive,
     client: Option<Arc<Client>>,
     handle: Option<BotHandle>,
-    wa_sender: mpsc::UnboundedSender<Arc<wa_events::Event>>,
+    wa_sender: mpsc::UnboundedSender<RuntimeEvent>,
     me_pn: Option<String>,
     me_lid: Option<String>,
     me_name: Option<String>,
@@ -319,6 +352,8 @@ struct ParsedChat {
     pinned_at: Option<i64>,
     /// Outer None means the history chunk omitted mute metadata.
     muted_until: Option<Option<i64>>,
+    /// `None` means the history chunk omitted lock metadata.
+    locked: Option<bool>,
     ephemeral_expiration: Option<u32>,
     ephemeral_setting_timestamp: Option<i64>,
     last_activity: i64,
@@ -392,7 +427,28 @@ impl Worker {
         apply_ephemeral_expiration(message, self.ephemeral_expiration(chat))
     }
 
-    fn emit(&self, event: Event) {
+    fn emit(&self, mut event: Event) {
+        if let Event::Syncing(syncing) = &mut event {
+            *syncing |= !self.privacy_ready;
+        }
+        // An upgraded archive has no reliable lock state until the library's
+        // authenticated replay has completed. Keep private content off the UI
+        // and out of notifications during recovery, including failed retries.
+        if !self.privacy_ready
+            && matches!(
+                event,
+                Event::Chats(_)
+                    | Event::ChatUpdated(_)
+                    | Event::Messages { .. }
+                    | Event::MessageUpdated(_)
+                    | Event::Incoming { .. }
+                    | Event::Contacts(_)
+                    | Event::SearchHits { .. }
+                    | Event::Typing { .. }
+            )
+        {
+            return;
+        }
         let _ = self.events.send(event);
         self.waker.wake();
     }
@@ -629,12 +685,7 @@ impl Worker {
                     .with_version(app_version())
                     .with_platform_type(wa::device_props::PlatformType::DESKTOP),
             )
-            .on_event(move |event, _client| {
-                let sender = sender.clone();
-                async move {
-                    let _ = sender.send(event);
-                }
-            })
+            .with_event_handler(UiEvents(sender))
             .build()
             .await;
         match bot {
@@ -650,29 +701,58 @@ impl Worker {
         }
     }
 
-    fn refresh_legacy_preferences(&self) {
+    fn refresh_legacy_preferences(&mut self) {
+        if self.privacy_ready
+            || self.privacy_recovering
+            || Instant::now() < self.privacy_retry
+            || !matches!(self.status, LinkStatus::Connected)
+        {
+            return;
+        }
         let Some(client) = self.client.clone() else {
             return;
         };
-        match self.archive.take_preferences_refresh() {
-            Ok(true) => {
-                tokio::spawn(async move {
-                    use whatsapp_rust::{WAPatchName, sync_task::MajorSyncTask};
-                    // The protocol library owns collection locking, full
-                    // snapshots, and bounded retries across reconnects. Do
-                    // not reset its store or add an application retry loop.
-                    for name in [WAPatchName::RegularLow, WAPatchName::RegularHigh] {
-                        client
-                            .process_sync_task(MajorSyncTask::AppStateSync {
-                                name,
-                                full_sync: true,
-                            })
-                            .await;
-                    }
-                });
+        self.privacy_recovering = true;
+        let sender = self.wa_sender.clone();
+        let generation = self.privacy_generation;
+        self.emit(Event::Syncing(true));
+        tokio::spawn(async move {
+            use whatsapp_rust::WAPatchName;
+            let mut success = true;
+            for name in [WAPatchName::RegularLow, WAPatchName::RegularHigh] {
+                match client.resync_app_state_collection(name).await {
+                    Ok(report) if report.all_synced() => {}
+                    _ => success = false,
+                }
             }
-            Ok(false) => {}
-            Err(error) => log::warn!("could not schedule chat preference recovery: {error}"),
+            // Use the same queue as the replayed mutations, so lock updates
+            // are applied before the completion marker can expose chat rows.
+            let _ = sender.send(RuntimeEvent::PreferencesRecovered {
+                generation,
+                success,
+            });
+        });
+    }
+
+    fn preferences_recovered(&mut self, generation: u64, success: bool) {
+        // A completed task from an unlinked device cannot authorize showing
+        // chats belonging to the next linked account.
+        if generation != self.privacy_generation {
+            return;
+        }
+        self.privacy_recovering = false;
+        if success
+            && self
+                .archive
+                .set_meta("chat_privacy_ready_v1", "complete")
+                .is_ok()
+        {
+            self.privacy_ready = true;
+            self.load_state();
+            self.emit(Event::Syncing(false));
+        } else {
+            self.privacy_retry = Instant::now() + Duration::from_secs(30);
+            log::warn!("chat privacy recovery failed; retrying with chats hidden");
         }
     }
 
@@ -1210,6 +1290,15 @@ impl Worker {
                         .set_muted_at(&chat, until, update.timestamp.timestamp_millis());
                 self.emit_chat(&chat);
             }
+            E::LockChatUpdate(update) => {
+                let chat = self.canonical(&update.jid);
+                self.ensure_chat(&chat, None);
+                let locked = update.action.locked.unwrap_or(false);
+                let _ =
+                    self.archive
+                        .set_locked_at(&chat, locked, update.timestamp.timestamp_millis());
+                self.emit_chat(&chat);
+            }
             E::MarkChatAsReadUpdate(update) => {
                 let chat = self.canonical(&update.jid);
                 self.ensure_chat(&chat, None);
@@ -1324,6 +1413,7 @@ impl Worker {
     }
 
     async fn on_logged_out(&mut self) {
+        self.privacy_generation = self.privacy_generation.wrapping_add(1);
         self.stop_bot().await;
         if let Err(error) = self.archive.clear() {
             log::warn!("could not clear the archive: {error}");
@@ -1357,6 +1447,9 @@ impl Worker {
         let _ = std::fs::remove_dir_all(self.dirs.avatar_cache_dir());
         let _ = std::fs::remove_dir_all(self.dirs.media_cache_dir());
         self.emit(Event::Chats(Vec::new()));
+        self.privacy_ready = false;
+        self.privacy_recovering = false;
+        self.privacy_retry = Instant::now();
         self.set_status(LinkStatus::LoggedOut);
         // Recreate the store so the next connection starts linking.
         self.start_bot().await;
@@ -2144,9 +2237,17 @@ impl Worker {
                 row.muted_until = chat
                     .muted_until
                     .unwrap_or_else(|| existing.as_ref().and_then(|row| row.muted_until));
+                row.locked = chat
+                    .locked
+                    .unwrap_or_else(|| existing.as_ref().is_some_and(|row| row.locked));
                 if self.archive.upsert_chat(&row).is_err() {
                     log::warn!("could not store a chat");
                     continue;
+                }
+                // History has no lock timestamp, so it must not supersede
+                // an app-state update already received from the phone.
+                if let Some(locked) = chat.locked {
+                    let _ = self.archive.set_locked_snapshot(&id, locked);
                 }
             }
             if let Some(expiration) = chat.ephemeral_expiration {
@@ -5454,6 +5555,7 @@ fn parse_conversation(conversation: wa::Conversation) -> ParsedChat {
         }),
         ephemeral_expiration: conversation.ephemeral_expiration,
         ephemeral_setting_timestamp: conversation.ephemeral_setting_timestamp,
+        locked: conversation.locked,
         last_activity,
         pn_jid: conversation.pn_jid.clone(),
         lid_jid: conversation.lid_jid.clone(),
@@ -5583,6 +5685,55 @@ mod tests {
             classify(&message),
             Some(Content::Text { preview: None, .. })
         ));
+    }
+
+    #[test]
+    fn privacy_recovery_hides_content_until_a_successful_replay() {
+        let (mut worker, events, _, _) = receipt_tests::worker();
+        const PEER: &str = "fixture@s.whatsapp.net";
+        worker.privacy_ready = false;
+        worker.archive.ensure_chat(PEER, "Fixture").unwrap();
+        worker.emit_chats();
+        assert!(events.try_recv().is_err());
+        worker.preferences_recovered(0, false);
+        assert!(!worker.privacy_ready);
+        assert!(
+            worker
+                .archive
+                .meta("chat_privacy_ready_v1")
+                .unwrap()
+                .is_none()
+        );
+        worker.archive.set_locked_at(PEER, true, 100).unwrap();
+        worker.preferences_recovered(0, true);
+        assert!(worker.privacy_ready);
+        let chats = events
+            .try_iter()
+            .find_map(|event| match event {
+                Event::Chats(chats) => Some(chats),
+                _ => None,
+            })
+            .unwrap();
+        assert!(chats[0].locked);
+    }
+
+    #[test]
+    fn stale_privacy_recovery_cannot_expose_a_different_linked_account() {
+        let (mut worker, events, _, _) = receipt_tests::worker();
+        worker.privacy_ready = false;
+        worker.privacy_recovering = true;
+        worker.privacy_generation = 1;
+        worker.preferences_recovered(0, true);
+        assert!(!worker.privacy_ready);
+        assert!(worker.privacy_recovering);
+        assert!(events.try_recv().is_err());
+        assert!(
+            worker
+                .archive
+                .meta("chat_privacy_ready_v1")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -5871,13 +6022,17 @@ mod receipt_tests {
         Worker,
         std::sync::mpsc::Receiver<Event>,
         mpsc::UnboundedReceiver<Command>,
-        mpsc::UnboundedReceiver<Arc<wa_events::Event>>,
+        mpsc::UnboundedReceiver<RuntimeEvent>,
     ) {
         let (events, events_rx) = std::sync::mpsc::channel();
         let (commands, inbox) = mpsc::unbounded_channel();
         let (wa_sender, wa_events) = mpsc::unbounded_channel();
         let root = std::env::temp_dir().join(format!("zapfast-worker-test-{}", std::process::id()));
         let worker = Worker {
+            privacy_ready: true,
+            privacy_recovering: false,
+            privacy_generation: 0,
+            privacy_retry: Instant::now(),
             dirs: AppDirs::under(&root),
             events,
             commands,
@@ -6522,6 +6677,13 @@ mod receipt_tests {
         });
         assert_eq!(chat.pinned_at, Some(1_700_000_000_000));
         assert_eq!(chat.muted_until, Some(Some(1_800_000_000)));
+        assert_eq!(chat.locked, None, "absence must preserve existing state");
+        let chat = parse_conversation(wa::Conversation {
+            id: PEER.into(),
+            locked: Some(true),
+            ..Default::default()
+        });
+        assert_eq!(chat.locked, Some(true));
         for (end, expected) in [
             (None, None),
             (Some(0), Some(None)),
@@ -6586,6 +6748,37 @@ mod receipt_tests {
             assert_eq!(after.pinned, before.pinned);
             assert_eq!(after.pinned_at, before.pinned_at);
         }
+    }
+
+    #[tokio::test]
+    async fn lock_sync_survives_stale_history_replay() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        let time = whatsapp_rust::wacore::time::now_utc();
+        let lock = wa_events::LockChatUpdate::builder()
+            .jid(PEER.parse().unwrap())
+            .timestamp(time)
+            .from_full_sync(true)
+            .action(Box::new(wa::sync_action_value::LockChatAction {
+                locked: Some(true),
+            }))
+            .build();
+        worker
+            .handle_wa_event(Arc::new(wa_events::Event::LockChatUpdate(lock)))
+            .await;
+        let before = worker
+            .archive
+            .chat(PEER)
+            .unwrap()
+            .expect("sync creates the chat");
+        assert!(before.locked);
+
+        // A history chunk cannot supersede a timestamped app-state update.
+        worker.apply_history(history(0), true);
+        assert!(worker.archive.chat(PEER).unwrap().unwrap().locked);
+        let mut locked_history = history(0);
+        locked_history.chats[0].locked = Some(false);
+        worker.apply_history(locked_history, true);
+        assert!(worker.archive.chat(PEER).unwrap().unwrap().locked);
     }
 
     #[test]

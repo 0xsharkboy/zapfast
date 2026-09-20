@@ -265,9 +265,22 @@ with `Ctrl+,`. Use the pencil to message a new number or save a contact. You
 can also open a group member's contact card. Saved names sync through WhatsApp
 to your phone and linked devices.
 
+### Locked chats
+
+Chats locked on your phone stay hidden from ZapFast's chat list, search,
+unread counts, forwarding destinations, and desktop notifications. Unlock a
+chat on your phone to show it here. Locking an open conversation closes it.
+ZapFast does not store a separate secret code or offer a desktop reveal flow.
+
+On the first start after upgrading, chats wait for WhatsApp's lock-state
+recovery before appearing. Failed recovery retries while keeping chats hidden.
+The recovered state is saved in the encrypted archive for offline use.
+
 Protocol logs omit private payloads and raw error details, including verbose
 logging. Panic logs record the source location without the panic payload.
 Pairing signature failures and rate limits retain a diagnostic category.
+
+An offline preview uses `--demo --demo-page locked`.
 
 The protocol dependency includes the upstream WhatsApp Business pairing fix.
 Device-store migration waits until an updated window is acknowledged, preserving

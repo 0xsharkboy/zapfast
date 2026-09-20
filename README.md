@@ -217,6 +217,13 @@ its archive intact and waits before connecting. It never saves a replacement
 plaintext archive. Back up both the archive and its OS keyring key: copying only
 `archive.db` to another computer is insufficient.
 
+A missing key is different from a locked keyring. If ZapFast says the key is
+missing, restore the original OS credential store or use the original profile
+location. Do not delete the archive or create replacement credentials: neither
+can decrypt the existing archive. For help, report the OS, app version, whether
+the profile was moved/restored, and the error text with personal paths removed.
+Never attach the archive, keys, or full logs from older releases.
+
 Only `archive.db` and its SQLite journal/WAL are encrypted. Device credentials in
 `session.db`, downloaded media, profile pictures, saved sticker files and settings
 remain ordinary files. Use full-disk encryption for those files, swap, backups and
@@ -285,8 +292,8 @@ Protocol logs omit private payloads and raw error details, including verbose
 logging. Panic logs record the source location without the panic payload.
 Pairing signature failures and rate limits retain a diagnostic category.
 
-Offline previews for these states use `--demo --demo-page channel` and
-`--demo --demo-page locked`.
+Offline previews for these states use `--demo --demo-page channel`,
+`--demo --demo-page locked`, and `--demo --demo-page keyring`.
 
 The protocol dependency includes the upstream WhatsApp Business pairing fix.
 Device-store migration waits until an updated window is acknowledged, preserving

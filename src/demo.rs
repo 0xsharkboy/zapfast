@@ -840,6 +840,10 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                 app.chats[0].locked = true;
                 app.open_chat = None;
             }
+            "keyring" => {
+                unlink(app);
+                app.link = LinkStatus::Failed("The archive is encrypted but its OS keyring key is missing. Restore the original keyring; the archive has not been changed".into());
+            }
             "disappearing" => {
                 let chat = app
                     .chats
@@ -1427,6 +1431,7 @@ mod tests {
         for page in [
             "channel",
             "locked",
+            "keyring",
             "empty",
             "rtl",
             "disappearing",

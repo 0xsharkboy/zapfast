@@ -281,10 +281,15 @@ to your phone and linked devices.
 
 ### Locked chats
 
-Chats locked on your phone stay hidden from ZapFast's chat list, search,
-unread counts, forwarding destinations, and desktop notifications. Unlock a
-chat on your phone to show it here. Locking an open conversation closes it.
-ZapFast does not store a separate secret code or offer a desktop reveal flow.
+**Lock chat** in a chat's right-click menu moves the chat into a locked
+folder: it disappears from the chat list, search, and the unread badge, and
+its messages never raise a desktop notification. The lock state syncs
+with your phone and other linked devices.
+
+Set a **secret code for locked chats** in Settings, then type the code in the
+search field: a "Locked chats" entry appears below the search. Click it to
+open the folder; leaving it (back button, or changing the search) hides the
+locked chats again until you retype the code.
 
 On the first start after upgrading, chats wait for WhatsApp's lock-state
 recovery before appearing. Failed recovery retries while keeping chats hidden.

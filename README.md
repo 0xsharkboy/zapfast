@@ -177,6 +177,16 @@ yay -S zapfast          # the release, built from source
 yay -S zapfast-git      # built from the latest commit
 ```
 
+With [Nix](https://nixos.org), install the package directly from its flake:
+
+```sh
+nix profile install github:crmne/zapfast
+```
+
+NixOS configurations can add the repository as a flake input and include
+`inputs.zapfast.packages.${pkgs.system}.default` in
+`environment.systemPackages`.
+
 Builds for every release are on the
 [releases page](https://github.com/crmne/zapfast/releases):
 
@@ -252,6 +262,10 @@ Then:
 cargo install --path .
 zapfast
 ```
+
+With Nix, `nix develop` provides the pinned Rust toolchain and all native build
+dependencies. From the checkout, use `nix build .#zapfast` to build the package
+or `nix run .#zapfast` to run it.
 
 The desktop file and icon are in `packaging/`.
 

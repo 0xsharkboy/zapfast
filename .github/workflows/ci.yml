@@ -120,4 +120,7 @@ jobs:
         with:
           primary-key: nix-${{ matrix.system }}-${{ hashFiles('**/flake.lock') }}
           restore-prefixes-first-match: nix-${{ matrix.system }}-
-      - run: nix build .#default
+      - name: Check flake outputs
+        run: nix flake check --no-build
+      - name: Build package
+        run: nix build .#default
